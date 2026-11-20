@@ -1,0 +1,2 @@
+[console_scripts]
+pacman_otm = pacman_otm.cli:main
