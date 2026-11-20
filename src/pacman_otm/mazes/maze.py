@@ -17,6 +17,8 @@ class Maze:
     CORRIDOR = 0
     WALL = 1
     VOID = 2
+    GHOST_INTERIOR = 3
+    GHOST_GATE = 4
 
     def __init__(self, topography, pacman_start, pellets):
 
