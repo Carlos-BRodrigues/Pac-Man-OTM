@@ -22,14 +22,21 @@ in small verified steps.** Do not jump straight to large changes.
 Common commands:
 
 ```powershell
+python -m pacman_otm mazes                       # list mazes; --show NAME prints one
 python -m pacman_otm simulate --controller nearest-pellet --visualize
-python -m pacman_otm simulate --controller random-walk --seed 7 --output run.json --show-history
-python -m pacman_otm play
+python -m pacman_otm simulate --maze small --controller random-walk --seed 7 --output run.json --show-history
+python -m pacman_otm play --maze small
 python -m pacman_otm experiment --controller random-walk --runs 20 --seed 42
 python -m pacman_otm replay run.json
+python -m pytest                                  # needs: pip install -e ".[dev]"
 ```
 
-`simulate` and `play` always save to `results/` (auto-named `<controller>_<timestamp>.json`, or
+`--maze NAME|PATH` (simulate, play, experiment) takes a registered name or a path to a `.txt` layout;
+the default is `classic` everywhere. In `experiment`, `--seed` is the experiment seed: run i gets a
+maze seed and a controller seed from `derive_run_seeds(seed, i)`, so different controllers run with
+the same `--seed` see the same maze sequence.
+
+`simulate` and `play` always save to `results/` (auto-named `<controller>_<maze>_<timestamp>.json`, or
 `--output NAME`; `--no-save` to skip). `replay` also looks up bare names in `results/`.
 Play controls: after a 2 s "READY!" hold, Pac-Man always moves (starting left); arrows/WASD change direction, and a turn pressed
 early is taken at the next opening. Esc quits.
@@ -41,7 +48,12 @@ Replay controls: Space play/pause, ←/→ step, Home/End jump, ↑/↓ speed, E
 | Path | Responsibility |
 |---|---|
 | `simulation/actions.py` | `Action` enum (UP/DOWN/LEFT/RIGHT). A leaf module; imports nothing internal. |
-| `mazes/maze.py`, `mazes/maps.py` | `Maze`: topography grid, start, initial pellets, walkability, valid moves. Map factories. |
+| `mazes/tiles.py` | `Tile` enum and `TILE_RULES` (walkable, pellet allowed). Tile values are stored in results: never renumber. Behaviour comes from the rules, never from `== 0`. |
+| `mazes/maze.py` | `Maze`: immutable grid, start, pellets, `origin`; validates tiles, positions and pellet reachability; precomputed neighbour table (`MOVEMENTS` order). |
+| `mazes/layout.py`, `mazes/layouts/*.txt` | Text layouts (`# . o space P _ H -`): `parse_layout`, `load_layout`, `format_layout`. Trailing spaces are tiles. |
+| `mazes/origin.py`, `mazes/serialization.py` | `MazeOrigin` (how a maze was made: layout/generated, name, generator, params, seed); maze ↔ dict for results. |
+| `mazes/registry.py` | Every `layouts/*.txt` as a named maze; `resolve_maze(name or path)`; `DEFAULT_MAZE`. |
+| `experiments/seeding.py` | `derive_run_seeds(experiment_seed, run_index)` → independent maze and controller seeds. |
 | `simulation/state.py` | `SimulationState`: position, remaining pellets, steps, termination. `copy()` / `to_dict()`. |
 | `simulation/engine.py` | `SimulationEngine`: the game rules. Executes an action, updates state, records history. Decides nothing. |
 | `algorithms/pathfinding/` | Pathfinders (`BreadthFirstSearch.find_path(maze, start, goal) -> list[Action] \| None`). Pure; no game decisions. |
@@ -105,7 +117,15 @@ Dependency direction, lowest to highest — imports should only point downward:
 **Add a metric**: add the field to `SimulationMetrics`, compute it in `from_engine`, add it to the
 experiment aggregates if numeric, and check old result JSON files still load (or say clearly that they won't).
 
-**Add a maze**: add a factory in `mazes/maps.py`; `Maze` validates walls, start and pellets for you.
+**Add a maze**: drop a `.txt` layout in `mazes/layouts/`; it is registered under its file stem.
+`Maze` validates tiles, the start, pellet placement and reachability for you. A new tile type needs a
+`Tile` value, a `TILE_RULES` entry, a layout character and a renderer colour.
+
+**Change the result format**: bump `FORMAT_VERSION` in `simulation/result.py`. Old files are rejected
+with a clear message; backward compatibility is not maintained at this stage.
+
+**Tests**: `tests/golden/` holds fingerprints of reference runs. If they fail, behaviour changed; only
+regenerate them (`python tests/make_golden.py`) when the change is intended, and say so.
 
 ## How to work
 
@@ -125,9 +145,6 @@ experiment aggregates if numeric, and check old result JSON files still load (or
   pellet would be far faster on the classic maze, but tie-breaking between equally near pellets must be
   kept identical (currently lowest `(row, col)`) or baseline results will change.
 - The tunnel row in the classic maze has no wrap-around.
-- `simulate` and `play` use the classic (medium) maze, `experiment` the small one; there is no `--maze` option.
 - Each saved state carries the full remaining-pellet set; storing per-step deltas would shrink files
   further but changes the result format.
-- No automated test suite yet (`src/test.py` is a manual script).
-- `requirements.txt` is UTF-16 encoded and pins the package to an old commit; `src/pacman_otm.egg-info/`
-  is committed and should be in `.gitignore`.
+- `src/test.py` is an old manual script; the real tests live in `tests/`.

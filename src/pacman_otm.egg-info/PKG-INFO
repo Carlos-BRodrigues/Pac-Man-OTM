@@ -1,7 +1,0 @@
-Metadata-Version: 2.4
-Name: pacman-otm
-Version: 0.1.0
-Summary: Pac-Man environment for combinatorial optimization research
-Requires-Python: >=3.15
-Requires-Dist: numpy>=2.5.5
-Requires-Dist: pygame-ce>=2.5.8

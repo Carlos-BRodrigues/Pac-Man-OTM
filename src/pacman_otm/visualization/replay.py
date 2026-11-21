@@ -80,7 +80,7 @@ class ReplayPygameVisualizer:
         mode = "Playing" if self.playing else "Paused"
 
         pygame.display.set_caption(
-            f"Pac-Man OTM | Replay "
+            f"{self.renderer.caption} | Replay "
             f"{self.replay.current_index + 1}/{self.replay.total_frames} "
             f"| {mode} | {self.fps} FPS"
         )

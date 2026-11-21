@@ -7,6 +7,7 @@ from typing import Any
 
 from pacman_otm.mazes.maze import Maze
 from pacman_otm.controllers.controller import Controller
+from pacman_otm.experiments.seeding import RunSeeds, derive_run_seeds
 from pacman_otm.simulation.engine import SimulationEngine
 from pacman_otm.simulation.runner import run_simulation
 from pacman_otm.simulation.result import SimulationResult
@@ -14,36 +15,50 @@ from pacman_otm.statistics_.serialization import pretty_json
 
 ControllerFactory = Callable[[Maze, int], Controller]
 
+# maze seed -> maze. A fixed maze ignores the seed; a generator will use it.
+MazeFactory = Callable[[int], Maze]
+
+# Called after each run with (run index, result), e.g. to print progress.
+RunCallback = Callable[[int, SimulationResult], None]
+
 
 @dataclass
 class ExperimentResults:
     name: str
     output_dir: Path
     runs: list[SimulationResult]
+    seeds: list[RunSeeds]
 
 
 class ExperimentRunner:
+    """
+    Runs one controller over a sequence of mazes. Run i uses the seeds
+    derive_run_seeds(seed, i), so the maze sequence depends only on the
+    experiment seed and is identical for every controller.
+    """
 
     def __init__(
         self,
-        maze: Maze,
+        maze_factory: MazeFactory,
         controller_factory: ControllerFactory,
         controller_name: str,
         experiment_name: str,
-        map_name: str = "unnamed_map",
+        maze_label: str,
         output_root: str | Path = "results",
-        base_seed: int = 42,
+        seed: int = 42,
         max_steps: int = 1000,
+        on_run: RunCallback | None = None,
     ) -> None:
 
-        self.maze = maze
+        self.maze_factory = maze_factory
         self.controller_factory = controller_factory
         self.controller_name = controller_name
         self.experiment_name = experiment_name
-        self.map_name = map_name
+        self.maze_label = maze_label
         self.output_root = Path(output_root)
-        self.base_seed = base_seed
+        self.seed = seed
         self.max_steps = max_steps
+        self.on_run = on_run
 
     def _create_output_dir(self) -> Path:
 
@@ -61,21 +76,6 @@ class ExperimentRunner:
 
         return output_dir
 
-    def _map_to_dict(self) -> dict[str, Any]:
-
-        return {
-            "name": self.map_name,
-            "dimensions": [
-                self.maze.height,
-                self.maze.width,
-            ],
-            "topography": self.maze.topography.tolist(),
-            "pacman_start": list(self.maze.pacman_start),
-            "initial_pellets": [
-                list(position) for position in sorted(self.maze.initial_pellets)
-            ],
-        }
-
     def run(self, number_of_runs: int) -> ExperimentResults:
 
         if number_of_runs <= 0:
@@ -86,13 +86,16 @@ class ExperimentRunner:
         runs_dir.mkdir()
 
         results = []
+        run_seeds = []
 
         for run_index in range(number_of_runs):
 
-            seed = self.base_seed + run_index
+            seeds = derive_run_seeds(self.seed, run_index)
+            run_seeds.append(seeds)
 
-            engine = SimulationEngine(self.maze)
-            controller = self.controller_factory(self.maze, seed)
+            maze = self.maze_factory(seeds.maze_seed)
+            engine = SimulationEngine(maze)
+            controller = self.controller_factory(maze, seeds.controller_seed)
 
             result = run_simulation(
                 engine=engine,
@@ -107,10 +110,14 @@ class ExperimentRunner:
 
             results.append(result)
 
+            if self.on_run is not None:
+                self.on_run(run_index, result)
+
         experiment_results = ExperimentResults(
             name=self.experiment_name,
             output_dir=output_dir,
             runs=results,
+            seeds=run_seeds,
         )
 
         self._export_results(experiment_results)
@@ -166,12 +173,15 @@ class ExperimentRunner:
 
         run_records = []
 
-        for index, result in enumerate(experiment.runs):
+        for index, (result, seeds) in enumerate(zip(experiment.runs, experiment.seeds)):
 
+            # The full maze lives in each run's result.json; here only what identifies it.
             run_records.append(
                 {
                     "run": index + 1,
-                    "seed": self.base_seed + index,
+                    "maze": result.maze.name if result.maze is not None else None,
+                    "maze_seed": seeds.maze_seed,
+                    "controller_seed": seeds.controller_seed,
                     **result.metrics.to_dict(),
                 }
             )
@@ -181,11 +191,11 @@ class ExperimentRunner:
                 "name": experiment.name,
                 "controller": self.controller_name,
                 "controller_type": (experiment.runs[0].controller or {}).get("type"),
+                "maze": self.maze_label,
                 "number_of_runs": len(experiment.runs),
-                "base_seed": self.base_seed,
+                "seed": self.seed,
                 "max_steps": self.max_steps,
             },
-            "map": self._map_to_dict(),
             "aggregates": self._calculate_aggregates(experiment.runs),
             "individual_runs": run_records,
         }

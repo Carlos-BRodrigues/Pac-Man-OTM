@@ -5,12 +5,16 @@ from pathlib import Path
 from typing import Any
 
 from pacman_otm.mazes.maze import Maze
+from pacman_otm.mazes.serialization import maze_from_dict, maze_to_dict
 from pacman_otm.simulation.state import SimulationState
 from pacman_otm.simulation.actions import Action
 from pacman_otm.simulation.engine import SimulationEngine
 from pacman_otm.statistics_.metrics import SimulationMetrics
 from pacman_otm.statistics_.serialization import pretty_json
 from pacman_otm.controllers.controller import ControllerStatus
+
+# Bumped whenever the saved layout changes. 2: maze.origin, maze.dimensions.
+FORMAT_VERSION = 2
 
 
 @dataclass
@@ -76,23 +80,11 @@ class SimulationResult:
 
         return history
 
-    def _maze_to_dict(self) -> dict[str, Any] | None:
-        if self.maze is None:
-            return None
-
-        return {
-            "topography": self.maze.topography.tolist(),
-            "pacman_start": list(self.maze.pacman_start),
-            "initial_pellets": [
-                list(position)
-                for position in sorted(self.maze.initial_pellets)
-            ],
-        }
-
     def to_dict(self) -> dict[str, Any]:
         return {
+            "format_version": FORMAT_VERSION,
             "controller": self.controller,
-            "maze": self._maze_to_dict(),
+            "maze": maze_to_dict(self.maze) if self.maze is not None else None,
             "states": [state.to_dict() for state in self.states],
             "actions": [action.value for action in self.actions],
             "statuses": [
@@ -115,6 +107,14 @@ class SimulationResult:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SimulationResult:
+        version = data.get("format_version")
+
+        if version != FORMAT_VERSION:
+            raise ValueError(
+                f"Unsupported result format version {version!r}; this version of "
+                f"pacman_otm reads version {FORMAT_VERSION}. Re-run the simulation."
+            )
+
         maze_data = data.get("maze")
 
         if maze_data is None:
@@ -123,14 +123,7 @@ class SimulationResult:
                 "cannot be replayed independently."
             )
 
-        maze = Maze(
-            topography=maze_data["topography"],
-            pacman_start=tuple(maze_data["pacman_start"]),
-            pellets={
-                tuple(position)
-                for position in maze_data["initial_pellets"]
-            },
-        )
+        maze = maze_from_dict(maze_data)
 
         states = []
 

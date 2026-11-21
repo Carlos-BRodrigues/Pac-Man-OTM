@@ -1,10 +1,25 @@
+from collections import deque
+from collections.abc import Callable, Iterable
+
 import numpy as np
 
+from pacman_otm.mazes.origin import MazeOrigin
+from pacman_otm.mazes.tiles import TILE_RULES, Tile, TileRules
 from pacman_otm.simulation.actions import Action
+
+Position = tuple[int, int]
 
 
 class Maze:
+    """
+    The static map: tiles, Pac-Man's start and the initial pellets.
 
+    Immutable after construction (read-only array, frozenset of pellets), so
+    one Maze can be shared by many runs and by every state that refers to it.
+    """
+
+    # Order matters: it is the tie-break for BFS and the draw order for
+    # random controllers. UP, LEFT, DOWN, RIGHT.
     MOVEMENTS = frozendict(
         {
             Action.UP: (-1, 0),
@@ -14,98 +29,168 @@ class Maze:
         }
     )
 
-    CORRIDOR = 0
-    WALL = 1
-    VOID = 2
-    GHOST_INTERIOR = 3
-    GHOST_GATE = 4
+    def __init__(
+        self,
+        topography: Iterable[Iterable[int]] | np.ndarray,
+        pacman_start: Position,
+        pellets: Iterable[Position],
+        origin: MazeOrigin | None = None,
+    ) -> None:
 
-    def __init__(self, topography, pacman_start, pellets):
+        self.topography = self._build_topography(topography)
+        self.topography.flags.writeable = False
 
-        self.topography = np.array(topography, dtype=np.uint8)
+        self.pacman_start: Position = tuple(pacman_start)
+        self.initial_pellets: frozenset[Position] = frozenset(
+            tuple(position) for position in pellets
+        )
+        self.origin = origin
 
-        self.pacman_start = tuple(pacman_start)
+        self._walkable = self._mask(lambda rules: rules.pacman_walkable)
+        self._pellet_allowed = self._mask(lambda rules: rules.pellet_allowed)
 
-        self.initial_pellets = set(pellets)
+        self._validate_positions()
 
-        self._validate()
+        # Built once: movement queries happen on every step and every BFS expansion.
+        self._neighbours = self._build_neighbours()
+
+        self._validate_reachability()
 
     @property
-    def height(self):
+    def height(self) -> int:
         return self.topography.shape[0]
 
     @property
-    def width(self):
+    def width(self) -> int:
         return self.topography.shape[1]
 
-    def is_walkable(self, position):
+    @property
+    def name(self) -> str:
+        return self.origin.name if self.origin is not None else "unnamed"
+
+    def in_bounds(self, position: Position) -> bool:
         row, col = position
+        return 0 <= row < self.height and 0 <= col < self.width
 
-        if not (0 <= row < self.height and 0 <= col < self.width):
-            return False
+    def is_walkable(self, position: Position) -> bool:
+        return self.in_bounds(position) and bool(self._walkable[position])
 
-        return self.topography[row, col] == 0
+    def validate_position(self, position: Position) -> None:
+        if not self.is_walkable(position):
+            raise ValueError(f"Position {position} is not walkable.")
 
-    def _validate(self):
+    def get_destination(self, position: Position, action: Action) -> Position:
+        row, col = position
+        d_row, d_col = self.MOVEMENTS[action]
+        return row + d_row, col + d_col
 
-        if self.topography.ndim != 2:
-            raise ValueError("Maze topography must be two-dimensional.")
+    def get_valid_movements(self, position: Position) -> frozendict[Action, Position]:
+        """Walkable moves from a walkable position, in MOVEMENTS order."""
 
-        if self.topography.size == 0:
-            raise ValueError("Maze cannot be empty.")
+        self.validate_position(position)
+        return self._neighbours[position]
 
-        if not np.isin(self.topography, [0, 1, 2]).all():
-            raise ValueError("Topography must contain only 0, 1, or 2.")
-
-        if not self.is_walkable(self.pacman_start):
-            raise ValueError("Pac-Man starting position must be walkable.")
-
-        for pellet in self.initial_pellets:
-            if not self.is_walkable(pellet):
-                raise ValueError(f"Pellet position {pellet} must be walkable.")
+    def walkable_positions(self) -> list[Position]:
+        return list(self._neighbours)
 
     def debug_print(self) -> None:
-        print("MAZE TOPOGRAPHY")
+        print(f"MAZE {self.name}")
         print("-" * 25)
         print(self.topography)
         print(f"Dimensions: {self.height} x {self.width}")
         print(f"Initial pellets: {len(self.initial_pellets)}")
 
-    def validate_position(self, position: tuple[int, int]) -> None:
-        if not self.is_walkable(position):
-            raise ValueError(f"Position {position} is not walkable.")
+    # Construction and validation
 
-    def get_destination(
-        self,
-        position: tuple[int, int],
-        action: Action,
-    ) -> tuple[int, int]:
+    @staticmethod
+    def _build_topography(topography) -> np.ndarray:
+        try:
+            # int64 first so out-of-range values are reported, not wrapped.
+            grid = np.array(topography, dtype=np.int64)
+        except ValueError as error:
+            raise ValueError(
+                "Maze topography must be a rectangular grid of integers."
+            ) from error
 
-        row, col = position
-        d_row, d_col = self.MOVEMENTS[action]
+        if grid.ndim != 2:
+            raise ValueError("Maze topography must be a two-dimensional grid.")
 
-        return row + d_row, col + d_col
+        if grid.size == 0:
+            raise ValueError("Maze cannot be empty.")
 
-    def get_valid_movements(
-        self,
-        position: tuple[int, int],
-    ) -> dict[Action, tuple[int, int]]:
-        """
-        TIE-BREAKER:
-        UP
-        LEFT
-        DOWN
-        RIGHT
-        """
+        known = sorted(int(tile) for tile in Tile)
+        unknown = sorted(set(np.unique(grid).tolist()) - set(known))
 
-        self.validate_position(position)
+        if unknown:
+            raise ValueError(
+                f"Topography contains unknown tile values {unknown}; "
+                f"known tiles are {known}."
+            )
 
-        valid_movements = {}
+        return grid.astype(np.uint8)
 
-        for action in self.MOVEMENTS:
-            destination = self.get_destination(position, action)
+    def _mask(self, rule: Callable[[TileRules], bool]) -> np.ndarray:
+        mask = np.zeros(self.topography.shape, dtype=bool)
 
-            if self.is_walkable(destination):
-                valid_movements[action] = destination
+        for tile, rules in TILE_RULES.items():
+            if rule(rules):
+                mask |= self.topography == tile
 
-        return valid_movements
+        mask.flags.writeable = False
+        return mask
+
+    def _validate_positions(self) -> None:
+
+        if not self.is_walkable(self.pacman_start):
+            raise ValueError(
+                f"Pac-Man start {self.pacman_start} must be on a walkable tile."
+            )
+
+        misplaced = sorted(
+            pellet
+            for pellet in self.initial_pellets
+            if not (self.in_bounds(pellet) and self._pellet_allowed[pellet])
+        )
+
+        if misplaced:
+            raise ValueError(
+                f"{len(misplaced)} pellet(s) on tiles that do not allow pellets, "
+                f"e.g. {misplaced[:5]}."
+            )
+
+    def _build_neighbours(self) -> dict[Position, frozendict[Action, Position]]:
+        neighbours = {}
+
+        for row, col in zip(*np.nonzero(self._walkable)):
+            position = (int(row), int(col))
+            moves = {}
+
+            for action in self.MOVEMENTS:
+                destination = self.get_destination(position, action)
+
+                if self.is_walkable(destination):
+                    moves[action] = destination
+
+            neighbours[position] = frozendict(moves)
+
+        return neighbours
+
+    def _validate_reachability(self) -> None:
+        """Every pellet must be collectable, or no run could ever complete."""
+
+        reached = {self.pacman_start}
+        frontier = deque([self.pacman_start])
+
+        while frontier:
+            for neighbour in self._neighbours[frontier.popleft()].values():
+                if neighbour not in reached:
+                    reached.add(neighbour)
+                    frontier.append(neighbour)
+
+        unreachable = sorted(self.initial_pellets - reached)
+
+        if unreachable:
+            raise ValueError(
+                f"{len(unreachable)} pellet(s) cannot be reached from the start "
+                f"{self.pacman_start}, e.g. {unreachable[:5]}."
+            )

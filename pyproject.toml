@@ -13,8 +13,17 @@ dependencies = [
     "pygame-ce>=2.5.8"
 ]
 
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"pacman_otm.mazes" = ["layouts/*.txt"]
+
 [project.scripts]
 pacman_otm = "pacman_otm.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
