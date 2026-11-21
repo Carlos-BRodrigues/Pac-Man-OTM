@@ -45,6 +45,21 @@ class SimulationEngine:
 
         return self.state
 
+    def terminate(self, reason: str) -> None:
+        """End the run for a reason outside the game rules (step limit, viewer closed).
+
+        No action is taken, so the latest history entry is amended rather than a new
+        one appended: len(states) == len(actions) + 1 must keep holding.
+        If the run has already ended, the original reason is kept.
+        """
+
+        if self.state.terminated:
+            return
+
+        self.state.terminated = True
+        self.state.termination_reason = reason
+        self.states[-1] = self.state.copy()
+
     def get_state(self, index: int) -> SimulationState:
         return self.states[index].copy()
 

@@ -26,24 +26,16 @@ def run_simulation(
     start_time = perf_counter()
     controller_time = 0.0
 
-    def stop_simulation(reason: str) -> None:
-        if not engine.state.terminated:
-            engine.state.terminated = True
-            engine.state.termination_reason = reason
-            engine.states[-1] = engine.state.copy()
-
     if on_frame is not None:
         should_continue = on_frame(SimulationFrame(state=engine.state.copy()))
 
         if should_continue is False:
-            stop_simulation("visualization_closed")
+            engine.terminate("visualization_closed")
 
     while not engine.state.terminated:
 
         if engine.state.steps >= max_steps:
-            engine.state.terminated = True
-            engine.state.termination_reason = "max_steps"
-            engine.states[-1] = engine.state.copy()
+            engine.terminate("max_steps")
             break
 
         decision_start = perf_counter()
@@ -65,7 +57,7 @@ def run_simulation(
             )
 
             if should_continue is False:
-                stop_simulation("visualization_closed")
+                engine.terminate("visualization_closed")
 
     elapsed_time = perf_counter() - start_time
 

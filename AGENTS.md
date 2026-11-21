@@ -111,8 +111,6 @@ experiment aggregates if numeric, and check old result JSON files still load (or
 
 - `statistics_/metrics.py` and `simulation/result.py` import `SimulationEngine`; metrics could instead be
   computed from a recorded history, keeping statistics independent of the live engine.
-- `run_simulation` sets termination by writing to `engine.state` / `engine.states[-1]` directly;
-  an engine method such as `terminate(reason)` would keep state changes inside the engine.
 - `run_simulation` uses `isinstance(controller, AlgorithmicController)` to call `reset()`;
   a no-op `reset()` on the base `Controller` would remove the dependency on the subclass.
 - `NearestPelletController` runs one BFS per remaining pellet; a single BFS that stops at the nearest

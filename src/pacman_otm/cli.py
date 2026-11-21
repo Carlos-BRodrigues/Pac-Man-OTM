@@ -204,7 +204,7 @@ def main() -> None:
     replay_parser.add_argument(
         "--fps",
         type=int,
-        default=8,
+        default=10,
         help="Initial replay speed.",
     )
 
