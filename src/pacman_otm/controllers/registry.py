@@ -1,6 +1,10 @@
 from collections.abc import Callable
 
-from pacman_otm.controllers.base import Controller
+from pacman_otm.controllers.controller import Controller
+from pacman_otm.controllers.algorithmic.simple.nearest_pellet import (
+    NearestPelletController,
+)
+from pacman_otm.controllers.stochastic.random_walk import RandomWalkController
 from pacman_otm.mazes.maze import Maze
 
 ControllerFactory = Callable[[Maze, int], Controller]
@@ -35,3 +39,23 @@ class ControllerRegistry:
 
     def names(self) -> list[str]:
         return sorted(self._factories)
+
+
+def create_controller_registry() -> ControllerRegistry:
+    """
+    All controllers that can be built from (maze, seed) alone.
+    Manual play needs a keyboard source, so the `play` command builds it instead.
+    """
+    registry = ControllerRegistry()
+
+    registry.register(
+        "nearest-pellet",
+        lambda maze, seed: NearestPelletController(maze),
+    )
+
+    registry.register(
+        "random-walk",
+        lambda maze, seed: RandomWalkController(maze, seed=seed),
+    )
+
+    return registry

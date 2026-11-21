@@ -1,8 +1,8 @@
 from collections import deque
 
 from pacman_otm.algorithms.pathfinding.bfs import BreadthFirstSearch
-from pacman_otm.controllers.algorithms.base import AlgorithmicController
-from pacman_otm.controllers.base import ControllerStatus
+from pacman_otm.controllers.algorithmic.base import AlgorithmicController
+from pacman_otm.controllers.controller import ControllerStatus
 from pacman_otm.mazes.maze import Maze
 from pacman_otm.simulation.actions import Action
 from pacman_otm.simulation.state import SimulationState
@@ -49,32 +49,11 @@ class NearestPelletController(AlgorithmicController):
 
     def _select_next_target(self, state: SimulationState) -> None:
 
-        candidates: list[tuple[int, Position, list[Action]]] = []
-
-        for pellet in sorted(state.remaining_pellets):
-            path = self.pathfinder.find_path(
-                maze=self.maze,
-                start=state.pacman_position,
-                goal=pellet,
-            )
-
-            if path is not None:
-                candidates.append((len(path), pellet, path))
-
-        if not candidates:
-            self.current_target = None
-            self.current_plan.clear()
-            self.planned_path = ()
-            self.path_index = 0
-            self.clear_status()
-            return
-
-        _, self.current_target, best_path = min(
-            candidates,
-            key=lambda candidate: (candidate[0], candidate[1]),
+        path = self.pathfinder.find_path_to_nearest(
+            self.maze, state.pacman_position, state.remaining_pellets
         )
 
-        self.current_plan = deque(best_path)
+        self.current_plan = deque(path)
         self.path_index = 0
 
         # Build the position sequence only when status is enabled.
@@ -82,7 +61,7 @@ class NearestPelletController(AlgorithmicController):
             position = state.pacman_position
             positions = []
 
-            for action in best_path:
+            for action in path:
                 position = self.maze.get_destination(position, action)
                 positions.append(position)
 

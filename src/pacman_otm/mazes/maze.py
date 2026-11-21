@@ -8,8 +8,8 @@ class Maze:
     MOVEMENTS = frozendict(
         {
             Action.UP: (-1, 0),
-            Action.DOWN: (1, 0),
             Action.LEFT: (0, -1),
+            Action.DOWN: (1, 0),
             Action.RIGHT: (0, 1),
         }
     )
@@ -90,6 +90,13 @@ class Maze:
         self,
         position: tuple[int, int],
     ) -> dict[Action, tuple[int, int]]:
+        """
+        TIE-BREAKER:
+        UP
+        LEFT
+        DOWN
+        RIGHT
+        """
 
         self.validate_position(position)
 

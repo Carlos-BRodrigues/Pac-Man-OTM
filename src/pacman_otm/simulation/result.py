@@ -9,7 +9,8 @@ from pacman_otm.simulation.state import SimulationState
 from pacman_otm.simulation.actions import Action
 from pacman_otm.simulation.engine import SimulationEngine
 from pacman_otm.statistics_.metrics import SimulationMetrics
-from pacman_otm.controllers.base import ControllerStatus
+from pacman_otm.statistics_.serialization import pretty_json
+from pacman_otm.controllers.controller import ControllerStatus
 
 
 @dataclass
@@ -19,6 +20,8 @@ class SimulationResult:
     statuses: list[ControllerStatus | None]
     metrics: SimulationMetrics
     maze: Maze | None = None
+    # Controller.describe() of the player; None for results saved before it was recorded
+    controller: dict[str, Any] | None = None
 
     @classmethod
     def from_engine(
@@ -26,6 +29,7 @@ class SimulationResult:
         engine: SimulationEngine,
         metrics: SimulationMetrics,
         statuses: list[ControllerStatus | None] | None = None,
+        controller: dict[str, Any] | None = None,
     ) -> SimulationResult:
         return cls(
             states=[state.copy() for state in engine.states],
@@ -33,6 +37,7 @@ class SimulationResult:
             statuses=list(statuses) if statuses is not None else [],
             metrics=metrics,
             maze=engine.maze,
+            controller=dict(controller) if controller is not None else None,
         )
 
     @property
@@ -86,6 +91,7 @@ class SimulationResult:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "controller": self.controller,
             "maze": self._maze_to_dict(),
             "states": [state.to_dict() for state in self.states],
             "actions": [action.value for action in self.actions],
@@ -177,13 +183,14 @@ class SimulationResult:
             statuses=statuses,
             metrics=metrics,
             maze=maze,
+            controller=data.get("controller"),
         )
 
     def save_json(self, filepath: str | Path) -> None:
         path = Path(filepath)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
-            json.dumps(self.to_dict(), indent=4),
+            pretty_json(self.to_dict()),
             encoding="utf-8",
         )
 
@@ -203,15 +210,15 @@ class SimulationResult:
         }
 
         Path(filepath).write_text(
-            json.dumps(data, indent=4),
+            pretty_json(data),
             encoding="utf-8",
         )
 
     def save_metrics_json(self, filepath: str | Path) -> None:
         Path(filepath).write_text(
-            json.dumps(self.metrics.to_dict(), indent=4),
+            pretty_json(self.metrics.to_dict()),
             encoding="utf-8",
         )
 
     def __str__(self) -> str:
-        return json.dumps(self.to_dict(), indent=4)
+        return pretty_json(self.to_dict())

@@ -6,7 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 from pacman_otm.mazes.maze import Maze
-from pacman_otm.controllers.base import Controller
+from pacman_otm.controllers.controller import Controller
 from pacman_otm.simulation.engine import SimulationEngine
 from pacman_otm.simulation.runner import run_simulation
 from pacman_otm.simulation.result import SimulationResult
@@ -180,6 +180,7 @@ class ExperimentRunner:
             "experiment": {
                 "name": experiment.name,
                 "controller": self.controller_name,
+                "controller_type": (experiment.runs[0].controller or {}).get("type"),
                 "number_of_runs": len(experiment.runs),
                 "base_seed": self.base_seed,
                 "max_steps": self.max_steps,

@@ -51,7 +51,7 @@ class PygameRenderer:
 
         self.is_open = True
 
-    def draw(self, frame: SimulationFrame) -> None:
+    def draw(self, frame: SimulationFrame, message: str | None = None) -> None:
 
         self.screen.fill(self.background_color)
 
@@ -63,7 +63,22 @@ class PygameRenderer:
 
         self._draw_hud(frame)
 
+        if message is not None:
+            self._draw_message(message)
+
         pygame.display.flip()
+
+    def _draw_message(self, message: str) -> None:
+        """Draw a banner (e.g. "READY!") centred over the maze."""
+
+        text = self.font.render(message, True, self.pacman_color)
+
+        maze_center = (
+            self.margin + self.maze.width * self.tile_size // 2,
+            self.margin + self.hud_height + self.maze.height * self.tile_size // 2,
+        )
+
+        self.screen.blit(text, text.get_rect(center=maze_center))
 
     def _draw_maze(self, frame: SimulationFrame) -> None:
 

@@ -1,8 +1,7 @@
 from time import perf_counter
 from collections.abc import Callable
 
-from pacman_otm.controllers.base import Controller
-from pacman_otm.controllers.algorithms.base import AlgorithmicController
+from pacman_otm.controllers.controller import Controller, ControllerAborted
 
 from pacman_otm.simulation.engine import SimulationEngine
 from pacman_otm.simulation.result import SimulationResult
@@ -17,8 +16,7 @@ def run_simulation(
     on_frame: Callable[[SimulationFrame], bool | None] | None = None,
 ) -> SimulationResult:
 
-    if isinstance(controller, AlgorithmicController):
-        controller.reset()
+    controller.reset()
 
     statuses = []
     controller.clear_status()
@@ -39,8 +37,14 @@ def run_simulation(
             break
 
         decision_start = perf_counter()
-        action = controller.select_action(engine.state)
-        controller_time += perf_counter() - decision_start
+
+        try:
+            action = controller.select_action(engine.state)
+        except ControllerAborted as abort:
+            engine.terminate(abort.reason)
+            break
+        finally:
+            controller_time += perf_counter() - decision_start
 
         status = controller.get_status()
         statuses.append(status)
@@ -71,4 +75,5 @@ def run_simulation(
         engine,
         metrics,
         statuses=statuses,
+        controller=controller.describe(),
     )

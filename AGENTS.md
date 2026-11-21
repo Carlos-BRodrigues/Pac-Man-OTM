@@ -23,10 +23,16 @@ Common commands:
 
 ```powershell
 python -m pacman_otm simulate --controller nearest-pellet --visualize
-python -m pacman_otm simulate --output results/run.json --show-history
-python -m pacman_otm experiment --controller random --runs 20 --seed 42
-python -m pacman_otm replay results/test_replay.json
+python -m pacman_otm simulate --controller random-walk --seed 7 --output run.json --show-history
+python -m pacman_otm play
+python -m pacman_otm experiment --controller random-walk --runs 20 --seed 42
+python -m pacman_otm replay run.json
 ```
+
+`simulate` and `play` always save to `results/` (auto-named `<controller>_<timestamp>.json`, or
+`--output NAME`; `--no-save` to skip). `replay` also looks up bare names in `results/`.
+Play controls: after a 2 s "READY!" hold, Pac-Man always moves (starting left); arrows/WASD change direction, and a turn pressed
+early is taken at the next opening. Esc quits.
 
 Replay controls: Space play/pause, ←/→ step, Home/End jump, ↑/↓ speed, Esc quit.
 
@@ -39,14 +45,17 @@ Replay controls: Space play/pause, ←/→ step, Home/End jump, ↑/↓ speed, E
 | `simulation/state.py` | `SimulationState`: position, remaining pellets, steps, termination. `copy()` / `to_dict()`. |
 | `simulation/engine.py` | `SimulationEngine`: the game rules. Executes an action, updates state, records history. Decides nothing. |
 | `algorithms/pathfinding/` | Pathfinders (`BreadthFirstSearch.find_path(maze, start, goal) -> list[Action] \| None`). Pure; no game decisions. |
-| `controllers/` | Decision-makers. `Controller.select_action(state) -> Action`, optional `ControllerStatus` (target, planned path). |
-| `controllers/algorithms/` | Autonomous controllers (`AlgorithmicController`, with `reset()`) and the registry used by the CLI. |
+| `controllers/controller.py` | `Controller`: `select_action(state) -> Action`, `reset()`, `describe()` (saved in results), optional `ControllerStatus`. `ControllerAborted(reason)` ends a run from inside a decision. |
+| `controllers/algorithmic/` | Deterministic autonomous controllers (`AlgorithmicController`), e.g. `simple/nearest_pellet.py`. |
+| `controllers/stochastic/` | `StochasticController` owns a seeded `self.rng`; `describe()` records the seed. E.g. `random_walk.py`. |
+| `controllers/manual/` | `ManualController(action_source)`: a human player; the input source is injected (no UI imports). |
+| `controllers/registry.py` | `create_controller_registry()`: every controller buildable from `(maze, seed)`; the CLI choices. |
 | `simulation/runner.py` | `run_simulation`: the loop that asks the controller, steps the engine, emits frames, times decisions. |
 | `simulation/result.py` | `SimulationResult`: the complete recorded run (states, actions, statuses, metrics, maze) + JSON I/O. |
 | `simulation/replay.py`, `frame.py` | `ReplayPlayer` navigates a `SimulationResult` only. `SimulationFrame` = state + action + status. |
 | `statistics_/` | `SimulationMetrics` (aggregate numbers) and `pretty_json`. |
 | `experiments/runner.py` | Batch runs with seeds; writes per-run JSON plus `results.json` / `results.csv` aggregates. |
-| `visualization/` | Pygame renderer, live visualizer (an `on_frame` callback), replay visualizer. Draws frames, nothing else. |
+| `visualization/` | Pygame renderer, live visualizer (an `on_frame` callback), replay visualizer, `keyboard.py` (action source for `play`). Draws frames and reads input, no game rules. |
 | `cli.py` | Argument parsing and wiring. No logic beyond assembling components. |
 
 ## Architectural rules (do not break these)
@@ -85,11 +94,12 @@ Dependency direction, lowest to highest — imports should only point downward:
 ## Common tasks
 
 **Add a controller**
-1. Subclass `AlgorithmicController` in `controllers/algorithms/<name>.py`; implement `select_action` and `reset`.
-2. Accept `maze` (and `seed` if it uses randomness) in `__init__`; call `reset()` there.
+1. Subclass `AlgorithmicController` (deterministic) or `StochasticController` (uses `self.rng`) in
+   `controllers/algorithmic/` or `controllers/stochastic/`; implement `select_action` and `reset`.
+2. Accept `maze` (and `seed` for stochastic ones, passed to `super().__init__`) in `__init__`; call `reset()` there.
 3. Publish intentions with `self._update_status(ControllerStatus(...))`, skipping expensive work when
    `self._status_collection_enabled` is false (see `NearestPelletController`).
-4. Register it in `controllers/algorithms/registry.py`. The CLI picks it up automatically.
+4. Register it in `controllers/registry.py`. The CLI picks it up automatically.
 5. Verify with `simulate --visualize`, then `experiment` against `nearest-pellet` as the baseline.
 
 **Add a metric**: add the field to `SimulationMetrics`, compute it in `from_engine`, add it to the
@@ -111,14 +121,13 @@ experiment aggregates if numeric, and check old result JSON files still load (or
 
 - `statistics_/metrics.py` and `simulation/result.py` import `SimulationEngine`; metrics could instead be
   computed from a recorded history, keeping statistics independent of the live engine.
-- `run_simulation` uses `isinstance(controller, AlgorithmicController)` to call `reset()`;
-  a no-op `reset()` on the base `Controller` would remove the dependency on the subclass.
 - `NearestPelletController` runs one BFS per remaining pellet; a single BFS that stops at the nearest
   pellet would be far faster on the classic maze, but tie-breaking between equally near pellets must be
   kept identical (currently lowest `(row, col)`) or baseline results will change.
-- `RandomController.movements` duplicates `Maze.MOVEMENTS` and is unused.
 - The tunnel row in the classic maze has no wrap-around.
-- `simulate` uses the classic (medium) maze, `experiment` the small one; there is no `--maze` option.
+- `simulate` and `play` use the classic (medium) maze, `experiment` the small one; there is no `--maze` option.
+- Each saved state carries the full remaining-pellet set; storing per-step deltas would shrink files
+  further but changes the result format.
 - No automated test suite yet (`src/test.py` is a manual script).
 - `requirements.txt` is UTF-16 encoded and pins the package to an old commit; `src/pacman_otm.egg-info/`
   is committed and should be in `.gitignore`.

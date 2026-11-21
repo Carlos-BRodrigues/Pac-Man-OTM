@@ -1,6 +1,6 @@
 from abc import abstractmethod
 
-from pacman_otm.controllers.base import Controller
+from pacman_otm.controllers.controller import Controller
 
 
 class AlgorithmicController(Controller):
@@ -8,6 +8,8 @@ class AlgorithmicController(Controller):
     Base class for autonomous controllers that make decisions
     and play the simulation without human intervention.
     """
+
+    controller_type = "algorithmic"
 
     def __init__(self):
         super().__init__()
