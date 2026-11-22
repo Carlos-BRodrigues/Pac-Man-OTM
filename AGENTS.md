@@ -23,6 +23,7 @@ Common commands:
 
 ```powershell
 python -m pacman_otm mazes                       # list mazes; --show NAME prints one
+python -m pacman_otm sprites                     # preview the player and death animations
 python -m pacman_otm simulate --controller nearest-pellet --visualize
 python -m pacman_otm simulate --maze small --controller random-walk --seed 7 --output run.json --show-history
 python -m pacman_otm play --maze small
@@ -42,6 +43,7 @@ Play controls: after a 2 s "READY!" hold, Pac-Man always moves (starting left); 
 early is taken at the next opening. Esc quits.
 
 Replay controls: Space play/pause, ←/→ step, Home/End jump, ↑/↓ speed, Esc quit.
+`simulate`, `play`, `replay` and `sprites` take `--scale N` (whole-number pixel scale; default: the largest that fits the screen).
 
 ## Package map
 
@@ -68,6 +70,9 @@ Replay controls: Space play/pause, ←/→ step, Home/End jump, ↑/↓ speed, E
 | `statistics_/` | `SimulationMetrics` (aggregate numbers) and `pretty_json`. |
 | `experiments/runner.py` | Batch runs with seeds; writes per-run JSON plus `results.json` / `results.csv` aggregates. |
 | `visualization/` | Pygame renderer, live visualizer (an `on_frame` callback), replay visualizer, `keyboard.py` (action source for `play`). Draws frames and reads input, no game rules. |
+| `visualization/theme.py` | All colours and pixel geometry (8x8 base-pixel tiles, 13x13 sprites, wall recess). Change the look here. |
+| `visualization/maze_art.py`, `sprites.py` | Maze background rendered once from masks (recessed, rounded outline walls); procedural player and death sprites. Original art: do not copy arcade sprites. |
+| `visualization/animation.py` | Player poses derived from recorded positions only (chomp loop, facing, freeze when blocked); 4 in-between frames per step, display only. |
 | `cli.py` | Argument parsing and wiring. No logic beyond assembling components. |
 
 ## Architectural rules (do not break these)

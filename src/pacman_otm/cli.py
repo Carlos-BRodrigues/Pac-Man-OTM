@@ -23,6 +23,7 @@ from pacman_otm.visualization.pygame_renderer import PygameRenderer
 from pacman_otm.visualization.live import LivePygameVisualizer
 from pacman_otm.visualization.replay import ReplayPygameVisualizer
 from pacman_otm.visualization.keyboard import PygameKeyboardInput
+from pacman_otm.visualization.sprite_preview import run_sprite_preview
 
 RESULTS_DIR = Path("results")
 
@@ -65,7 +66,7 @@ def run_simulate(args: argparse.Namespace) -> None:
     visualizer = None
 
     if args.visualize:
-        renderer = PygameRenderer(maze)
+        renderer = PygameRenderer(maze, scale=args.scale)
         visualizer = LivePygameVisualizer(renderer)
 
     try:
@@ -96,7 +97,7 @@ def run_play(args: argparse.Namespace) -> None:
     maze = resolve_maze(args.maze)
     engine = SimulationEngine(maze)
 
-    renderer = PygameRenderer(maze)
+    renderer = PygameRenderer(maze, scale=args.scale)
     # Arcade-style "READY!" hold before Pac-Man starts moving
     visualizer = LivePygameVisualizer(renderer, ready_seconds=2.0)
     controller = ManualController(
@@ -182,7 +183,7 @@ def run_replay(args: argparse.Namespace) -> None:
         raise ValueError("The saved result does not contain a maze.")
 
     replay = ReplayPlayer(result)
-    renderer = PygameRenderer(result.maze)
+    renderer = PygameRenderer(result.maze, scale=args.scale)
     visualizer = ReplayPygameVisualizer(
         renderer=renderer,
         replay=replay,
@@ -193,6 +194,10 @@ def run_replay(args: argparse.Namespace) -> None:
         visualizer.run()
     finally:
         visualizer.close()
+
+
+def run_sprites(args: argparse.Namespace) -> None:
+    run_sprite_preview(scale=args.scale if args.scale is not None else 6)
 
 
 def run_mazes(args: argparse.Namespace) -> None:
@@ -240,6 +245,15 @@ def positive_int(text: str) -> int:
         raise argparse.ArgumentTypeError(f"must be > 0, got {value}")
 
     return value
+
+
+def add_scale_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--scale",
+        type=positive_int,
+        default=None,
+        help="Pixel scale of the 8x8 tiles (whole number). Default: the largest that fits the screen.",
+    )
 
 
 def add_maze_argument(parser: argparse.ArgumentParser) -> None:
@@ -309,6 +323,7 @@ def main() -> None:
         help="Show the simulation live in Pygame.",
     )
 
+    add_scale_argument(simulate_parser)
     simulate_parser.set_defaults(func=run_simulate)
 
     # PLAY
@@ -333,6 +348,7 @@ def main() -> None:
         action="store_true",
         help="Do not save the result.",
     )
+    add_scale_argument(play_parser)
     play_parser.set_defaults(func=run_play)
 
     # EXPERIMENT
@@ -403,7 +419,16 @@ def main() -> None:
         help="Initial replay speed.",
     )
 
+    add_scale_argument(replay_parser)
     replay_parser.set_defaults(func=run_replay)
+
+    # SPRITES
+    sprites_parser = subparsers.add_parser(
+        "sprites",
+        help="Preview the player animation and death sequence.",
+    )
+    add_scale_argument(sprites_parser)
+    sprites_parser.set_defaults(func=run_sprites)
 
     # MAZES
     mazes_parser = subparsers.add_parser(

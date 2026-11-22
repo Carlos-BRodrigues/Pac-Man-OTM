@@ -1,22 +1,32 @@
 import pygame
 
 from pacman_otm.mazes.maze import Maze
-from pacman_otm.mazes.tiles import Tile
 from pacman_otm.simulation.frame import SimulationFrame
+from pacman_otm.visualization.animation import INITIAL_POSE, PlayerPose, move_direction
+from pacman_otm.visualization.maze_art import render_maze
+from pacman_otm.visualization.sprites import SpriteSet
+from pacman_otm.visualization.theme import DEFAULT_THEME, Theme
+
+Position = tuple[int, int]
 
 
 class PygameRenderer:
+    """
+    Draws SimulationFrames on a pixel grid: 8x8 base-pixel tiles scaled up by a
+    whole number. The maze background is rendered once; each frame adds pellets,
+    overlays and the player sprite. Draws only; no game rules.
+    """
 
-    MAX_TILE_SIZE = 20
-    MIN_TILE_SIZE = 4
+    MAX_SCALE = 6
     # Share of the desktop the window may use, leaving room for the title bar and taskbar.
     SCREEN_FRACTION = 0.9
+    MIN_WINDOW_WIDTH = 200
 
     def __init__(
         self,
         maze: Maze,
-        tile_size: int | None = None,
-        hud_height: int = 50,
+        scale: int | None = None,
+        theme: Theme = DEFAULT_THEME,
         show_target: bool = True,
         show_planned_path: bool = True,
     ) -> None:
@@ -24,81 +34,108 @@ class PygameRenderer:
         pygame.init()
 
         self.maze = maze
-        self.hud_height = hud_height
+        self.theme = theme
 
-        self.margin = 20
+        # None: the largest whole-number scale that keeps the window on screen.
+        self.scale = scale if scale is not None else self._fit_scale()
 
-        # None: the largest tile size that keeps the whole maze on screen.
-        self.tile_size = tile_size if tile_size is not None else self._fit_tile_size()
-        tile_size = self.tile_size
+        if self.scale < 1:
+            raise ValueError("The scale must be at least 1.")
 
-        self.width = maze.width * tile_size + 2 * self.margin
-        self.height = maze.height * tile_size + 2 * self.margin + hud_height
+        self.tile_px = theme.tile * self.scale
+        self.hud_px = theme.hud_height * self.scale
+
+        self.width = max(self.MIN_WINDOW_WIDTH, maze.width * self.tile_px)
+        self.height = self.hud_px + maze.height * self.tile_px
+        # Narrow mazes are centred in a window kept wide enough for the HUD.
+        self.maze_x = (self.width - maze.width * self.tile_px) // 2
 
         self.screen = pygame.display.set_mode((self.width, self.height))
 
         self.caption = f"Pac-Man OTM | {maze.name}"
         pygame.display.set_caption(self.caption)
 
-        self.font = pygame.font.Font(None, 30)
-        self.small_font = pygame.font.Font(None, 22)
+        self.font = pygame.font.Font(None, max(12, round(self.hud_px * 0.9)))
+        self.message_font = pygame.font.Font(None, max(16, self.tile_px * 2))
+
+        self.background = render_maze(maze, theme, self.scale)
+        self.sprites = SpriteSet(theme, self.scale)
 
         # Overlay settings
         self.show_target = show_target
         self.show_planned_path = show_planned_path
 
-        # Colors
-        self.background_color = (15, 15, 25)
-        self.gate_color = (255, 170, 220)
-
-        # Every tile needs an entry: an unknown tile is an error, not silently void.
-        self.tile_colors: dict[Tile, tuple[int, int, int]] = {
-            Tile.CORRIDOR: (20, 20, 35),
-            Tile.WALL: (35, 65, 180),
-            Tile.VOID: self.background_color,
-            Tile.GHOST_HOUSE: (45, 25, 55),
-            # The gate tile is drawn as a ghost-house fill with a bar across it.
-            Tile.GHOST_GATE: (45, 25, 55),
-        }
-        self.pellet_color = (245, 220, 170)
-        self.pacman_color = (255, 220, 0)
-        self.text_color = (240, 240, 240)
-
-        self.target_color = (11, 252, 3)
-        self.path_color = (11, 252, 3)
-
         self.is_open = True
 
-    def _fit_tile_size(self) -> int:
+    def _fit_scale(self) -> int:
         desktop_sizes = pygame.display.get_desktop_sizes()
         screen_width, screen_height = desktop_sizes[0] if desktop_sizes else (1280, 800)
 
-        available_width = screen_width * self.SCREEN_FRACTION - 2 * self.margin
-        available_height = (
-            screen_height * self.SCREEN_FRACTION - 2 * self.margin - self.hud_height
-        )
+        base_width = self.maze.width * self.theme.tile
+        base_height = self.maze.height * self.theme.tile + self.theme.hud_height
 
         fit = int(min(
-            available_width // self.maze.width,
-            available_height // self.maze.height,
+            screen_width * self.SCREEN_FRACTION // base_width,
+            screen_height * self.SCREEN_FRACTION // base_height,
         ))
 
-        return max(self.MIN_TILE_SIZE, min(self.MAX_TILE_SIZE, fit))
+        return max(1, min(self.MAX_SCALE, fit))
 
-    def _scaled(self, fraction: float, minimum: int = 1) -> int:
-        """A size proportional to the tile, never below `minimum` on tiny tiles."""
-        return max(minimum, round(self.tile_size * fraction))
+    # Drawing
 
-    def draw(self, frame: SimulationFrame, message: str | None = None) -> None:
+    def draw(
+        self,
+        frame: SimulationFrame,
+        pose: PlayerPose = INITIAL_POSE,
+        previous_frame: SimulationFrame | None = None,
+        progress: float = 1.0,
+        message: str | None = None,
+    ) -> None:
+        """
+        Draw a frame. With previous_frame and progress < 1, the player is drawn
+        part-way between the two positions (display only).
+        """
 
-        self.screen.fill(self.background_color)
+        self._draw_scene(frame, previous_frame, progress)
 
-        self._draw_maze(frame)
+        position = self._player_position(frame, previous_frame, progress)
+        self._blit_sprite(self.sprites.player(pose.mouth, pose.facing), position)
+
+        self._finish(frame, message)
+
+    def draw_death(
+        self,
+        frame: SimulationFrame,
+        death_index: int,
+        message: str | None = None,
+    ) -> None:
+        self._draw_scene(frame, None, 1.0)
+
+        position = self._tile_pixel(frame.state.pacman_position)
+        self._blit_sprite(self.sprites.death[death_index], position)
+
+        self._finish(frame, message)
+
+    def _draw_scene(
+        self,
+        frame: SimulationFrame,
+        previous_frame: SimulationFrame | None,
+        progress: float,
+    ) -> None:
+        self.screen.fill(self.theme.background)
+        self.screen.blit(self.background, (self.maze_x, self.hud_px))
+
+        # The pellet on the destination tile is eaten halfway through the move.
+        if previous_frame is not None and progress < 0.5:
+            pellets = previous_frame.state.remaining_pellets
+        else:
+            pellets = frame.state.remaining_pellets
+
+        self._draw_pellets(pellets)
         self._draw_planned_path(frame)
-        self._draw_pellets(frame)
         self._draw_target(frame)
-        self._draw_pacman(frame)
 
+    def _finish(self, frame: SimulationFrame, message: str | None) -> None:
         self._draw_hud(frame)
 
         if message is not None:
@@ -106,68 +143,61 @@ class PygameRenderer:
 
         pygame.display.flip()
 
+    def _tile_pixel(self, position: Position | tuple[float, float]) -> tuple[float, float]:
+        """Screen position of a tile's top-left corner (accepts fractional tiles)."""
+        row, col = position
+        return self.maze_x + col * self.tile_px, self.hud_px + row * self.tile_px
+
+    def _tile_center(self, position: Position) -> tuple[int, int]:
+        x, y = self._tile_pixel(position)
+        return round(x + self.tile_px / 2), round(y + self.tile_px / 2)
+
+    def _player_position(
+        self,
+        frame: SimulationFrame,
+        previous_frame: SimulationFrame | None,
+        progress: float,
+    ) -> tuple[float, float]:
+        current = frame.state.pacman_position
+
+        if previous_frame is None or progress >= 1.0:
+            return self._tile_pixel(current)
+
+        previous = previous_frame.state.pacman_position
+
+        # Only a one-tile move is interpolated; anything else is drawn in place.
+        if move_direction(previous, current) is None:
+            return self._tile_pixel(current)
+
+        row = previous[0] + (current[0] - previous[0]) * progress
+        col = previous[1] + (current[1] - previous[1]) * progress
+        return self._tile_pixel((row, col))
+
+    def _blit_sprite(self, sprite: pygame.Surface, tile_pixel: tuple[float, float]) -> None:
+        offset = self.theme.sprite_offset * self.scale
+        x, y = tile_pixel
+        self.screen.blit(sprite, (round(x + offset), round(y + offset)))
+
+    def _draw_pellets(self, pellets: set[Position]) -> None:
+        size = self.theme.pellet * self.scale
+        inset = (self.theme.tile - self.theme.pellet) // 2 * self.scale
+
+        for position in pellets:
+            x, y = self._tile_pixel(position)
+            self.screen.fill(
+                self.theme.pellet_color,
+                pygame.Rect(round(x) + inset, round(y) + inset, size, size),
+            )
+
     def _draw_message(self, message: str) -> None:
         """Draw a banner (e.g. "READY!") centred over the maze."""
 
-        text = self.font.render(message, True, self.pacman_color)
-
-        maze_center = (
-            self.margin + self.maze.width * self.tile_size // 2,
-            self.margin + self.hud_height + self.maze.height * self.tile_size // 2,
+        text = self.message_font.render(message, True, self.theme.player)
+        center = (
+            self.width // 2,
+            self.hud_px + self.maze.height * self.tile_px // 2,
         )
-
-        self.screen.blit(text, text.get_rect(center=maze_center))
-
-    def _draw_maze(self, frame: SimulationFrame) -> None:
-
-        for row in range(self.maze.height):
-            for col in range(self.maze.width):
-
-                tile = self.maze.topography[row, col]
-
-                rect = pygame.Rect(
-                    self.margin + col * self.tile_size,
-                    self.margin + self.hud_height + row * self.tile_size,
-                    self.tile_size,
-                    self.tile_size,
-                )
-
-                try:
-                    color = self.tile_colors[Tile(tile)]
-                except (ValueError, KeyError):
-                    raise ValueError(
-                        f"No colour for tile {tile} at {(row, col)}."
-                    ) from None
-
-                pygame.draw.rect(self.screen, color, rect)
-
-                if tile == Tile.GHOST_GATE:
-                    bar = rect.inflate(0, -rect.height * 2 // 3)
-                    pygame.draw.rect(self.screen, self.gate_color, bar)
-
-    def _draw_pellets(self, frame: SimulationFrame) -> None:
-
-        for row, col in frame.state.remaining_pellets:
-
-            center = self._tile_center((row, col))
-
-            pygame.draw.circle(
-                self.screen,
-                self.pellet_color,
-                center,
-                self._scaled(0.15),
-            )
-
-    def _draw_pacman(self, frame: SimulationFrame) -> None:
-
-        center = self._tile_center(frame.state.pacman_position)
-
-        pygame.draw.circle(
-            self.screen,
-            self.pacman_color,
-            center,
-            self._scaled(0.25, minimum=2),
-        )
+        self.screen.blit(text, text.get_rect(center=center))
 
     def _draw_target(self, frame: SimulationFrame) -> None:
 
@@ -179,14 +209,12 @@ class PygameRenderer:
         if target is None or target == frame.state.pacman_position:
             return
 
-        center = self._tile_center(target)
-
         pygame.draw.circle(
             self.screen,
-            self.target_color,
-            center,
-            max(2, self.tile_size // 2 - 2),
-            width=self._scaled(0.1),
+            self.theme.target,
+            self._tile_center(target),
+            self.tile_px * 3 // 4,
+            width=self.scale,
         )
 
     def _draw_planned_path(self, frame: SimulationFrame) -> None:
@@ -211,82 +239,34 @@ class PygameRenderer:
 
         points = [self._tile_center(position) for position in remaining_path]
 
-        # Draw the remaining path.
         pygame.draw.lines(
             self.screen,
-            self.path_color,
+            self.theme.path,
             False,
             points,
-            width=self._scaled(0.15),
-        )
-
-        # Draw an arrowhead pointing toward the next tile.
-        start = points[0]
-        end = points[1]
-
-        direction = pygame.Vector2(end) - pygame.Vector2(start)
-
-        if direction.length_squared() == 0:
-            return
-
-        direction = direction.normalize()
-
-        perpendicular = pygame.Vector2(-direction.y, direction.x)
-
-        arrow_length = max(2, self.tile_size // 3)
-        arrow_width = max(1, self.tile_size // 5)
-
-        tip = pygame.Vector2(end)
-
-        left = tip - direction * arrow_length + perpendicular * arrow_width
-
-        right = tip - direction * arrow_length - perpendicular * arrow_width
-
-        pygame.draw.polygon(
-            self.screen,
-            self.path_color,
-            [tip, left, right],
+            width=self.scale,
         )
 
     def _draw_hud(self, frame: SimulationFrame) -> None:
-
         step_text = self.font.render(
-            f"Step: {frame.state.steps}",
+            f"STEP {frame.state.steps}",
             True,
-            self.text_color,
+            self.theme.text,
         )
+        self.screen.blit(step_text, step_text.get_rect(midleft=(self.scale * 2, self.hud_px // 2)))
 
-        self.screen.blit(
-            step_text,
-            (self.margin, 10),
-        )
-
-        target_label = "Target: ON" if self.show_target else "Target: OFF"
-        path_label = "Path: ON" if self.show_planned_path else "Path: OFF"
-
-        overlay_text = self.small_font.render(
-            f"T: {target_label}    P: {path_label}",
+        overlay_text = self.font.render(
+            f"T:{'on' if self.show_target else 'off'}  "
+            f"P:{'on' if self.show_planned_path else 'off'}",
             True,
-            self.text_color,
+            self.theme.text,
         )
-
         self.screen.blit(
             overlay_text,
-            (self.margin + 150, 15),
+            overlay_text.get_rect(midright=(self.width - self.scale * 2, self.hud_px // 2)),
         )
 
-    def _tile_center(
-        self,
-        position: tuple[int, int],
-    ) -> tuple[int, int]:
-
-        row, col = position
-
-        x = self.margin + col * self.tile_size + self.tile_size // 2
-
-        y = self.margin + self.hud_height + row * self.tile_size + self.tile_size // 2
-
-        return x, y
+    # Events
 
     def handle_event(self, event: pygame.event.Event) -> None:
         if event.type == pygame.QUIT:

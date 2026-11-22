@@ -65,6 +65,11 @@ class Maze:
         return self.topography.shape[1]
 
     @property
+    def walkable_mask(self) -> np.ndarray:
+        """Read-only boolean grid of walkable tiles."""
+        return self._walkable
+
+    @property
     def name(self) -> str:
         return self.origin.name if self.origin is not None else "unnamed"
 
