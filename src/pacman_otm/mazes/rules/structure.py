@@ -92,8 +92,7 @@ class MaxStraightRun(Rule):
     def violations(self, grid: np.ndarray) -> list[Violation]:
         return [
             self._violation(f"straight run of {len(run)} tiles, at most {self.length}", run)
-            for run in straight_runs(walkable_mask(grid))
-            if len(run) > self.length
+            for run in straight_runs(walkable_mask(grid), min_length=self.length + 1)
         ]
 
 

@@ -27,3 +27,6 @@ pacman_otm = "pacman_otm.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Long sweeps: run them with `python -m pytest -m slow`.
+markers = ["slow: long seed sweeps, skipped by default"]
+addopts = "-m \"not slow\""

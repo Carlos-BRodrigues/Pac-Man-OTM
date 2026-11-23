@@ -1,7 +1,7 @@
 # Roadmap — Arbitrary and Generated Mazes
 
-Status: steps 0–4 done (commit `32c1c1b`); step 5 done (uncommitted). Steps 6–10 below are the
-agreed design for generation, recipes and experiments. Revised 2026-11-23; replaces the earlier steps 5–7.
+Status: steps 0–4 done (commit `32c1c1b`); step 5 done (`ea7ea19`); step 6 done (uncommitted).
+Steps 7–10 below are the agreed design for recipes, experiments and sculpting. Revised 2026-11-23; replaces the earlier steps 5–7.
 Added 2026-11-22: rule `max_corridor_length(length)` (step 5, done) and lattice params
 `straightness` and `node_dropout` (step 6); details in the implementation plan.
 Read `AGENTS.md` first; every rule there still applies.
@@ -59,6 +59,14 @@ three rules:
 - **Step 4:** maze registry, `--maze` on every command, `mazes` command, renderer scaling.
 - **Step 5:** `grid.py`, `rules/` (hard, local, structure, registry), `analysis.py`, `Maze` size bounds,
   `maze.metrics` in results (`FORMAT_VERSION = 3`), `mazes list | show | check [--rules FILE]`.
+- **Step 6:** `generation/shapes.py`, `generation/lattice.py` (with `straightness`, `node_dropout`).
+  Decisions made while building it:
+  - Hidden outer wall (touching no corridor, connected to the outside) becomes void, so the outline
+    follows the corridors and unreachable shape edges don't fail `max_block(wall)`. Looks identical.
+  - An overlong corridor with nowhere to branch is cut (if the maze stays connected); cut segments
+    are never re-added, which keeps repairs from oscillating.
+  - Mirrored both ways on small blobs, about 1% of seeds fail with a `GenerationError` naming the rule.
+  - 101×101 with strict rules: about 0.25–0.4 s (worst seen 0.8 s); open rules about 0.15 s.
 - Also in place: `experiments/seeding.py` (`derive_run_seeds`) and `ExperimentRunner(maze_factory=…)`.
 
 ---

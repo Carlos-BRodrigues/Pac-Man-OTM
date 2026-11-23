@@ -32,6 +32,7 @@ python -m pacman_otm play --maze small
 python -m pacman_otm experiment --controller random-walk --runs 20 --seed 42
 python -m pacman_otm replay run.json
 python -m pytest                                  # needs: pip install -e ".[dev]"
+python -m pytest -m slow                          # long seed sweeps (skipped by default)
 ```
 
 `--maze NAME|PATH` (simulate, play, experiment) takes a registered name or a path to a `.txt` layout;
@@ -57,6 +58,7 @@ Replay controls: Space play/pause, ←/→ step, Home/End jump, ↑/↓ speed, E
 | `mazes/layout.py`, `mazes/layouts/*.txt` | Text layouts (`# . o space P _ H -`): `parse_layout`, `load_layout`, `format_layout`. Trailing spaces are tiles. |
 | `mazes/grid.py` | Pure numpy helpers on a tile grid: masks, neighbour counts, k×k windows, components, straight runs, corridor chains. `MIN_MAZE_SIZE`/`MAX_MAZE_SIZE` (5–101). No `Maze` import. |
 | `mazes/rules/` | `Rule` (frozen dataclass; fields = parameters), `Violation` (rule, message, positions), `RuleSet`. `hard.py` (`HARD_RULES`: size_bounds, connected, enclosed), `local.py` (max_block, no_diagonal_contact), `structure.py` (dead ends, straight run, corridor length, junction share, loops, walkable fraction, mirror symmetry), `registry.py` (name → rule, built from TOML/JSON config with errors naming the field). Rules see tiles only. |
+| `mazes/generation/` | Topography generation. `shapes.py`: region masks (rectangle, ellipse, blob, layout), `playable_area`, `frame_grid`, `trim_outer_wall` (hidden outer wall → void). `lattice.py`: `LatticeParams` + `generate_lattice(region, params, rules, rng)`: lines → candidate graph → spanning tree (straightness bias, node dropout, mirror orbits) → repairs driven by violation positions → final full rule check. `errors.py`: `GenerationError` (names the rule and a fix). `registry.py`: generator names. |
 | `mazes/analysis.py` | `analyze(maze) -> MazeMetrics`: measurements only, no thresholds. Saved under `maze.metrics` in results; recomputed on load. |
 | `mazes/origin.py`, `mazes/serialization.py` | `MazeOrigin` (how a maze was made: layout/generated, name, generator, params, seed); maze ↔ dict for results. |
 | `mazes/registry.py` | Every `layouts/*.txt` as a named maze; `resolve_maze(name or path)`; `DEFAULT_MAZE`. |

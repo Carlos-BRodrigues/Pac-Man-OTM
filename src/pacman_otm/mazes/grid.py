@@ -137,11 +137,12 @@ def junction_mask(mask: np.ndarray) -> np.ndarray:
     return mask & (neighbour_counts(mask) >= 3)
 
 
-def straight_runs(mask: np.ndarray) -> list[tuple[Position, ...]]:
+def straight_runs(mask: np.ndarray, min_length: int = 2) -> list[tuple[Position, ...]]:
     """
     Straight stretches with no choice: maximal row and column segments of set
     cells, split at junctions. A junction ends one run and starts the next, so
-    it belongs to both. Runs of a single cell are left out.
+    it belongs to both. Only runs of at least `min_length` cells are returned
+    (never single cells): rows first, then columns, each in reading order.
     """
     junctions = junction_mask(mask)
     runs: list[tuple[Position, ...]] = []
@@ -149,33 +150,41 @@ def straight_runs(mask: np.ndarray) -> list[tuple[Position, ...]]:
     for transposed in (False, True):
         lines = mask.T if transposed else mask
         line_junctions = junctions.T if transposed else junctions
+        count, length = lines.shape
+        stride = length + 1
 
-        for index in range(lines.shape[0]):
-            line = lines[index]
-            is_junction = line_junctions[index]
-            current: list[int] = []
+        # One flat array, each line followed by an unset separator cell.
+        cells = np.zeros((count, stride), dtype=bool)
+        cells[:, :length] = lines
+        cells = cells.ravel()
+        is_junction = np.zeros((count, stride), dtype=bool)
+        is_junction[:, :length] = line_junctions
+        is_junction = is_junction.ravel()
 
-            # A trailing False flushes the last segment.
-            for offset, is_set in enumerate([*line.tolist(), False]):
-                if not is_set:
-                    if len(current) >= 2:
-                        runs.append(_line_positions(index, current, transposed))
-                    current = []
-                    continue
+        before = np.concatenate(([False], cells[:-1]))
+        after = np.concatenate((cells[1:], [False]))
+        starts = np.flatnonzero(cells & (~before | is_junction))
+        ends = np.flatnonzero(cells & (~after | is_junction))
+        segment = np.cumsum(cells & ~before)
 
-                current.append(offset)
+        # Each start runs to the first end after it, if that end is in the same segment.
+        next_end = np.searchsorted(ends, starts, side="right")
+        has_end = next_end < len(ends)
+        first, last = starts[has_end], ends[next_end[has_end]]
+        same = segment[first] == segment[last]
+        first, last = first[same], last[same]
+        long_enough = last - first + 1 >= max(min_length, 2)
 
-                if is_junction[offset] and len(current) >= 2:
-                    runs.append(_line_positions(index, current, transposed))
-                    current = [offset]
+        for start, end in zip(first[long_enough].tolist(), last[long_enough].tolist()):
+            index, offset = divmod(start, stride)
+            offsets = range(offset, offset + end - start + 1)
+
+            if transposed:
+                runs.append(tuple((cell, index) for cell in offsets))
+            else:
+                runs.append(tuple((index, cell) for cell in offsets))
 
     return runs
-
-
-def _line_positions(index: int, offsets: list[int], transposed: bool) -> tuple[Position, ...]:
-    if transposed:
-        return tuple((offset, index) for offset in offsets)
-    return tuple((index, offset) for offset in offsets)
 
 
 def corridor_chains(mask: np.ndarray) -> list[tuple[Position, ...]]:
