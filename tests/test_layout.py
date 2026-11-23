@@ -41,9 +41,9 @@ def test_legend() -> None:
 
 
 def test_crlf_and_trailing_blank_lines() -> None:
-    maze = parse_layout("###\r\n#P#\r\n###\r\n\r\n", name="crlf")
+    maze = parse_layout("#####\r\n#P  #\r\n#   #\r\n#   #\r\n#####\r\n\r\n", name="crlf")
 
-    assert maze.height == 3 and maze.width == 3
+    assert maze.height == 5 and maze.width == 5
 
 
 @pytest.mark.parametrize(

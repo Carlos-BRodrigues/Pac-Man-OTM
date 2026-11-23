@@ -17,6 +17,8 @@ def test_unreachable_pellet_is_rejected() -> None:
     layout = (
         "#######\n"
         "#P.#..#\n"
+        "#  #  #\n"
+        "#  #  #\n"
         "#######\n"
     )
 
@@ -24,9 +26,35 @@ def test_unreachable_pellet_is_rejected() -> None:
         parse_layout(layout, name="split")
 
 
+BOX_5X5 = [
+    [1, 1, 1, 1, 1],
+    [1, 0, 0, 0, 1],
+    [1, 0, 0, 0, 1],
+    [1, 0, 0, 0, 1],
+    [1, 1, 1, 1, 1],
+]
+
+
 def test_pellet_on_wall_is_rejected() -> None:
     with pytest.raises(ValueError, match="do not allow pellets"):
-        Maze(topography=[[1, 1, 1], [1, 0, 1], [1, 1, 1]], pacman_start=(1, 1), pellets={(0, 0)})
+        Maze(topography=BOX_5X5, pacman_start=(1, 1), pellets={(0, 0)})
+
+
+@pytest.mark.parametrize("shape", [(4, 5), (5, 4), (102, 5), (5, 102)])
+def test_size_bounds_are_enforced(shape: tuple[int, int]) -> None:
+    topography = [[1] * shape[1] for _ in range(shape[0])]
+    topography[1][1] = 0
+
+    with pytest.raises(ValueError, match=rf"size {shape[0]}x{shape[1]} is out of bounds"):
+        Maze(topography=topography, pacman_start=(1, 1), pellets=set())
+
+
+def test_size_bounds_are_inclusive() -> None:
+    assert Maze(topography=BOX_5X5, pacman_start=(1, 1), pellets=set()).height == 5
+
+    topography = [[1] * 101 for _ in range(101)]
+    topography[1][1] = 0
+    assert Maze(topography=topography, pacman_start=(1, 1), pellets=set()).width == 101
 
 
 def test_unknown_tile_is_rejected() -> None:

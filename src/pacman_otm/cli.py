@@ -2,7 +2,10 @@ import argparse
 from datetime import datetime
 from pathlib import Path
 
+from pacman_otm.mazes.analysis import analyze
 from pacman_otm.mazes.layout import format_layout
+from pacman_otm.mazes.rules.hard import HARD_RULES
+from pacman_otm.mazes.rules.registry import RuleConfigError, rules_from_toml
 from pacman_otm.mazes.registry import (
     DEFAULT_MAZE,
     MazeSpecError,
@@ -200,16 +203,65 @@ def run_sprites(args: argparse.Namespace) -> None:
     run_sprite_preview(scale=args.scale if args.scale is not None else 6)
 
 
-def run_mazes(args: argparse.Namespace) -> None:
-    if args.show is not None:
-        maze = resolve_maze(args.show)
-        print(
-            f"{maze.name}: {maze.height}x{maze.width}, "
-            f"{len(maze.initial_pellets)} pellets, start {maze.pacman_start}"
-        )
-        print(format_layout(maze), end="")
+def print_metrics(maze) -> None:
+    for key, value in analyze(maze).to_dict().items():
+        shown = f"{value:.3f}" if isinstance(value, float) else value
+        print(f"  {key:<24}{shown}")
+
+
+def run_mazes_show(args: argparse.Namespace) -> None:
+    maze = resolve_maze(args.spec)
+    print(
+        f"{maze.name}: {maze.height}x{maze.width}, "
+        f"{len(maze.initial_pellets)} pellets, start {maze.pacman_start}"
+    )
+    print(format_layout(maze), end="")
+    print("metrics:")
+    print_metrics(maze)
+
+
+def run_mazes_check(args: argparse.Namespace) -> None:
+    maze = resolve_maze(args.spec)
+    rules = HARD_RULES
+
+    if args.rules is not None:
+        path = Path(args.rules)
+
+        if not path.is_file():
+            raise RuleConfigError(f"Rules file '{path}' does not exist.")
+
+        rules = rules + rules_from_toml(path)
+
+    print(f"{maze.name}: {maze.height}x{maze.width}")
+    print("metrics:")
+    print_metrics(maze)
+
+    print("rules:")
+    violations = rules.violations(maze.topography)
+    failed = {violation.rule for violation in violations}
+
+    for rule in rules:
+        print(f"  {'FAIL' if rule.describe() in failed else 'ok':<6}{rule.describe()}")
+
+    if not violations:
+        print("No violations.")
         return
 
+    print(f"violations ({len(violations)}):")
+
+    for violation in violations:
+        print(f"  {violation.rule}: {violation.message}")
+
+        if violation.positions:
+            shown = ", ".join(str(position) for position in violation.positions[:args.max_positions])
+            more = len(violation.positions) - args.max_positions
+            suffix = f" ... and {more} more" if more > 0 else ""
+            print(f"    at {shown}{suffix}")
+
+    raise SystemExit(1)
+
+
+def run_mazes_list(args: argparse.Namespace) -> None:
     registry = create_maze_registry()
 
     print(f"{'name':<16}{'size':>8}{'walkable':>10}{'pellets':>9}")
@@ -433,21 +485,54 @@ def main() -> None:
     # MAZES
     mazes_parser = subparsers.add_parser(
         "mazes",
-        help="List the available mazes, or print one.",
+        help="List, show or check mazes (default: list).",
     )
-    mazes_parser.add_argument(
-        "--show",
-        metavar="NAME|PATH",
+    # 'mazes' alone lists, as before.
+    mazes_parser.set_defaults(func=run_mazes_list)
+    mazes_subparsers = mazes_parser.add_subparsers(dest="mazes_command")
+
+    mazes_list_parser = mazes_subparsers.add_parser(
+        "list",
+        help="List the available mazes.",
+    )
+    mazes_list_parser.set_defaults(func=run_mazes_list)
+
+    mazes_show_parser = mazes_subparsers.add_parser(
+        "show",
+        help="Print a maze as layout text, with its metrics.",
+    )
+    mazes_show_parser.add_argument("spec", metavar="NAME|PATH")
+    mazes_show_parser.set_defaults(func=run_mazes_show)
+
+    mazes_check_parser = mazes_subparsers.add_parser(
+        "check",
+        help="Check a maze against the hard rules (and optional extra rules).",
+        description=(
+            "Print a maze's metrics and its rule violations with positions. "
+            "The hard rules (size_bounds, connected, enclosed) are always checked. "
+            "Exits with status 1 if any rule fails."
+        ),
+    )
+    mazes_check_parser.add_argument("spec", metavar="NAME|PATH")
+    mazes_check_parser.add_argument(
+        "--rules",
+        metavar="FILE.toml",
         default=None,
-        help="Print this maze as layout text.",
+        help="TOML file whose [[rules]] tables are checked as well.",
     )
-    mazes_parser.set_defaults(func=run_mazes)
+    mazes_check_parser.add_argument(
+        "--max-positions",
+        type=positive_int,
+        default=10,
+        help="Positions shown per violation. Default: 10.",
+    )
+    mazes_check_parser.set_defaults(func=run_mazes_check)
 
     args = parser.parse_args()
 
     try:
         args.func(args)
-    except MazeSpecError as error:
+    except (MazeSpecError, RuleConfigError) as error:
         parser.error(str(error))
 
 

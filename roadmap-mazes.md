@@ -1,6 +1,9 @@
 # Roadmap — Arbitrary and Generated Mazes
 
-Status: agreed design, ready for implementation. Written 2026-11-21.
+Status: steps 0–4 done (commit `32c1c1b`); step 5 done (uncommitted). Steps 6–10 below are the
+agreed design for generation, recipes and experiments. Revised 2026-11-23; replaces the earlier steps 5–7.
+Added 2026-11-22: rule `max_corridor_length(length)` (step 5, done) and lattice params
+`straightness` and `node_dropout` (step 6); details in the implementation plan.
 Read `AGENTS.md` first; every rule there still applies.
 
 **How to use this file (for Claude Code):** work on **one step per session**. For each step:
@@ -12,217 +15,323 @@ Do not commit, push or delete files unless asked.
 
 ## Goal
 
-Mazes of any size and shape (non-rectangular via void), with corridors of any width,
-loaded from hand-written layouts or generated from a seed. Generated mazes pass
-quality rules (minimal or Pac-Man-like). An experiment can generate a fresh maze for
-every run and record, in each run file, the maze itself, how it was made and its measured
-properties.
+Mazes of any rectangular size within fixed bounds, any shape (void as padding), corridors of
+any width. Mazes come from hand-written layouts, saved generated mazes, or **recipes**.
+A recipe is a file naming a shape, a topography generator, a set of rules with parameters,
+and content placers. The same recipe and seed always give the same maze. Experiments can
+generate a fresh maze per run and record in each run file how it was made and what it measures.
 
-## Decisions already made
+## Decisions
 
 | Topic | Decision |
 |---|---|
-| Maze generality | Generic first. Any shape, any number of loops. Pac-Man-like mazes are a stricter quality tier, not the default. |
-| Corridor width | Any width is allowed by `Maze`. "One tile wide" is a quality rule, not a validation rule. |
-| Void | Non-playable cells that pad a non-rectangular maze into a rectangle. Never walkable; drawn as background, not as wall. |
-| Ghost house | Decorative only: non-walkable tiles drawn differently. No gate logic. |
-| Ghost spawns | (Later, with ghosts.) Arbitrary seeded positions on walkable tiles, subject to spawn rules. |
-| Power pellets | None. `o` in layouts is a normal pellet. |
-| Tunnels | Later. Modelled as portal pairs (connections) on `Maze`, not as a tile type. Tile 5 stays reserved. |
-| Tile numbers | Stable forever, because saved results store them. |
+| Generality | Generic first: any shape, any number of loops. Pac-Man-like is a recipe, not the default. |
+| Hard rules for generated mazes | Size within bounds; one connected walkable region; enclosed: no walkable tile 8-adjacent to void or the grid edge, so every maze has wall borders. |
+| Quality rules | Modular, optional, each with its own parameters, chosen per recipe. |
+| Topography vs content | Independent. Rules see only tiles. Pellets, start (and later ghost spawns) are placed afterwards, from their own seed stream. |
+| Size bounds | `MIN_MAZE_SIZE = 5`, `MAX_MAZE_SIZE = 101` for both rows and columns. Enforced by `Maze` for every maze. |
+| How rules are met | By construction where possible, then targeted repair, then a final check. Not generate-and-test. |
+| Corridor width | Any width; "one tile wide" is the rule `max_block(corridor, 2)`. |
+| Void | Padding for non-rectangular mazes; never walkable; drawn as background. |
+| Ghost house / ghosts | Decorative house (a reserved feature). Ghost spawns are a content placer, added later. No power pellets. |
+| Tunnels | Later: portal pairs on `Maze`. Until then `classic` fails the `enclosed` check on its tunnel row, which is expected. |
+| Recipe format | TOML (`tomllib`, standard library, read only) for hand-written recipes. JSON wherever recipes are saved into results. |
 
-## Tile set
+### Why "minimum corridor degree" is not a tile-level rule
 
-| Value | Tile | Pac-Man walkable | Pellet allowed | Drawn as |
-|---|---|---|---|---|
-| 0 | `CORRIDOR` | yes | yes | corridor |
-| 1 | `WALL` | no | no | wall |
-| 2 | `VOID` | no | no | background |
-| 3 | `GHOST_HOUSE` | no | no | decoration |
-| 4 | `GHOST_GATE` | no | no | decoration |
-| 5 | reserved (`TUNNEL`) | — | — | — |
+At tile level, a minimum degree of 3 is impossible in any finite grid maze. The top-most,
+left-most walkable tile can only have neighbours to the right and below, so it has at most 2.
+Degree 2 everywhere is exactly "no dead ends". The intent ("enough choices") is covered by
+three rules:
 
-Behaviour comes from a rules table (`TILE_RULES[tile].pacman_walkable`, …), never from `== 0` checks.
+- `max_dead_ends(count)`: tiles with one neighbour; `count = 0` means none.
+- `max_straight_run(length)`: longest corridor stretch with no junction; long runs offer no decisions.
+- `min_junction_share(share)`: fraction of walkable tiles with 3 or more neighbours.
 
 ---
 
-## Step 0 — Safety net
+## Done
 
-**Why:** every following step claims "no behaviour change". This step makes that claim checkable.
+- **Step 0:** pytest, golden results, housekeeping.
+- **Step 1:** `Tile` enum + `TILE_RULES`, renderer palette, decorative ghost tiles.
+- **Step 2:** text layouts in `mazes/layouts/`, `parse_layout` / `load_layout` / `format_layout`.
+- **Step 3:** immutable `Maze`, reachability validation, neighbour table, `MazeOrigin`, `format_version`.
+- **Step 4:** maze registry, `--maze` on every command, `mazes` command, renderer scaling.
+- **Step 5:** `grid.py`, `rules/` (hard, local, structure, registry), `analysis.py`, `Maze` size bounds,
+  `maze.metrics` in results (`FORMAT_VERSION = 3`), `mazes list | show | check [--rules FILE]`.
+- Also in place: `experiments/seeding.py` (`derive_run_seeds`) and `ExperimentRunner(maze_factory=…)`.
 
-- Add `pytest` as a dev dependency (optional dependency group in `pyproject.toml`), and `tests/`.
-- Save golden results in `tests/golden/`:
-  - `nearest-pellet` on small and classic
-  - `random-walk` seed 7 on small
-- Add a test that re-runs them and compares actions and states. Ignore the timing fields.
-- Fix the housekeeping items from `AGENTS.md`: UTF-8 `requirements.txt` without the self-pin, and `egg-info` in `.gitignore`.
+---
 
-**Done when:** `pytest` passes, and the golden test fails if one action is changed by hand.
+## Target package layout
 
-## Step 1 — Tile enum, rules table, renderer palette
-
-- `mazes/tiles.py`: `Tile(IntEnum)`, a frozen `TileRules` dataclass, `TILE_RULES`.
-- `Maze.is_walkable` and `_validate` use the rules table. Validation accepts exactly the defined tiles.
-- Classic layout: `H` → `GHOST_HOUSE`, `-` → `GHOST_GATE`. Both were walls before, so they remain non-walkable.
-- Renderer: a mapping from tile to colour. An unknown tile raises an error instead of being drawn as void.
-  Void is drawn in the background colour.
-
-**Done when:** golden tests pass unchanged, and the classic maze shows the ghost house distinctly.
-
-## Step 2 — Text layouts
-
-- `mazes/layout.py`: `parse_layout(text: str, name: str) -> Maze` with this legend:
-  - `#` wall
-  - `.` corridor with pellet
-  - `o` corridor with pellet (no power pellets)
-  - space: corridor without pellet
-  - `P`: Pac-Man start (corridor, no pellet)
-  - `_` void
-  - `H` ghost house
-  - `-` ghost gate
-- Error messages must name the row, column and character. Exactly one `P` is required. All rows must have the same length.
-- Move the small and classic mazes to `mazes/layouts/small.txt` and `classic.txt`, read with `pathlib` and `encoding="utf-8"`.
-- `maps.py` factories become thin wrappers, or are replaced by the registry in Step 4.
-- Remove the hard-coded 28×31 check.
-
-**Done when:** parsed topography, start and pellets are identical to the current factories (add a test), and golden tests pass.
-
-## Step 3 — Harden `Maze`
-
-- **Immutability:** read-only numpy array (`flags.writeable = False`) and `frozenset` pellets.
-- **Validation:**
-  - rectangular grid
-  - only known tiles
-  - start and pellets on tiles that allow them
-  - **every pellet reachable from the start**
-- **Neighbour table** built once in `__init__`. `get_valid_movements` reads from it.
-  This speeds up BFS; neighbour order must stay `Maze.MOVEMENTS` order.
-- **`MazeOrigin`** frozen dataclass:
-  - `source`: `"layout"` or `"generated"`
-  - `name`
-  - `generator`: `str | None`
-  - `params`: `dict`
-  - `seed`: `int | None`
-  - stored as `maze.origin`
-- **Result JSON:** `maze` gains `origin`. Old files without it still load, with origin `None`.
-  Add a top-level `format_version` field.
-
-**Done when:**
-- golden tests pass
-- a maze with an unreachable pellet is rejected with a clear message
-- an old saved result still replays
-
-## Step 4 — Maze registry and CLI
-
-- `mazes/registry.py`: name → factory, mirroring the controller registry.
-- CLI: `--maze NAME` for `simulate`, `play` and `experiment`, with the same default everywhere. This ends the small/classic mismatch.
-- Renderer: choose `tile_size` so the window fits a maximum size, which keeps large mazes on screen.
-
-**Done when:** `simulate --maze small` and `--maze classic` both work, and a 60×60 layout fits on screen.
-
-## Step 5 — Maze analysis and quality rules
-
-- `mazes/analysis.py`: `analyze(maze) -> MazeMetrics` (frozen dataclass). Measures:
-  - walkable cells
-  - walkable fraction
-  - connected regions
-  - dead ends (walkable cells with one neighbour)
-  - junctions (three or more neighbours)
-  - loops (cycle rank = walkable edges − walkable cells + regions)
-  - open 2×2 blocks (counts wide areas)
-  - maximum corridor width
-  - enclosed (no walkable cell next to void or the grid edge)
-  - mirror symmetry (left/right)
-  - pellet count
-- `mazes/quality.py`: `QualityRule` checks and named tiers. `check(maze, tier) -> list[str]` returns the reasons for failure; an empty list means it passes.
-  - **`minimal`**:
-    - 1 region
-    - enclosed
-    - loops ≥ 1
-    - dead-end share of walkable cells ≤ 0.25
-    - walkable fraction between 0.2 and 0.8
-    - at least 3 junctions
-  - **`pacman`**: everything in `minimal`, plus:
-    - 0 dead ends
-    - 0 open 2×2 blocks (corridors one tile wide)
-    - mirror-symmetric
-    - loops ≥ 10
-  - All thresholds are starting values in one place, to be tuned later.
-- Tests use tiny hand-written layouts: a tree maze fails `minimal`, the classic maze passes `pacman`, and an open room fails `pacman`.
-
-**Done when:** the tests above pass. `simulate` saves the maze metrics in the result under `maze.metrics`.
-
-## Step 6 — Generation framework and first generic generators
-
-Generation is a pipeline. Each stage is a small function taking a seeded `numpy.random.Generator`:
-
-1. **Shape mask.** Which cells of the H×W rectangle belong to the maze; everything else is void.
-   Start with `rectangle` and `blob` (random connected shape, optional mirror).
-2. **Carving.** Turn the masked area into walls and corridors. Two generators to start:
-   - `braided`: a grid maze (recursive backtracker on a cell grid) followed by braiding,
-     i.e. opening walls at dead ends with probability `braid` to create loops.
-     The `corridor_width` parameter scales cells, which gives corridors of any width.
-   - `cave`: random fill with density `p`, a few smoothing passes, then keep the largest region.
-     This gives open, irregular areas.
-3. **Border.** Wall cells surround the playable area, so the maze is enclosed.
-4. **Placement.** Pellets on every walkable cell, and a seeded random start.
-5. **Accept or retry.** Run the quality check for the requested tier. If it fails, retry with the same `rng`
-   (deterministic), up to `max_attempts`. On failure, raise an error listing the most common reasons.
-
-API sketch:
-
-```python
-@dataclass(frozen=True)
-class GeneratorConfig:
-    generator: str              # "braided" | "cave"
-    height: int
-    width: int
-    shape: str = "rectangle"
-    quality: str = "minimal"
-    params: frozendict = frozendict()
-    max_attempts: int = 200
-
-def generate_maze(config: GeneratorConfig, seed: int) -> Maze: ...
+```
+mazes/
+  tiles.py  maze.py  origin.py  layout.py  serialization.py  registry.py   (exist)
+  grid.py              # pure numpy helpers on a tile grid: windows, neighbour counts, masks
+  analysis.py          # MazeMetrics: measurements of a maze (no thresholds)
+  rules/
+    base.py            # Rule, Violation, RuleSet, check()
+    hard.py            # SizeBounds, Connected, Enclosed
+    local.py           # MaxBlock, NoDiagonalContact
+    structure.py       # MaxDeadEnds, MaxStraightRun, MinJunctionShare, MinLoops,
+                       # WalkableFraction, MirrorSymmetric
+    registry.py        # rule name -> rule class (built from recipe params)
+  generation/
+    shapes.py          # region masks: rectangle, ellipse, blob, layout
+    lattice.py         # constructive topography generator
+    sculpt.py          # constraint-preserving local search (step 9)
+    content.py         # pellet and start placers (ghost spawns later)
+    recipe.py          # MazeRecipe dataclass, TOML loading, --maze-set overrides
+    pipeline.py        # build_maze(recipe, seed) -> Maze
+    registry.py        # shape / generator / placer names -> implementations
+  recipes/*.toml       # named recipes, auto-registered like layouts
+  saved/*.json         # generated mazes kept by name, auto-registered
 ```
 
-- The same `(config, seed)` must always produce the same maze, on any machine.
-- `maze.origin` records the generator, its parameters (the full config) and the seed.
-- Add a `random` entry to the maze registry and CLI options: `--maze random --generator braided --size 31x28 --maze-seed 7 --quality minimal`.
-
-**Done when:**
-- determinism test passes (generate twice, compare)
-- 100 seeds per generator all pass their tier, or fail with clear reasons
-- generated mazes simulate and replay
-
-## Step 7 — Experiments with a maze per run
-
-- `ExperimentRunner` takes either a fixed maze or a `GeneratorConfig`.
-- **Seed separation:** one experiment seed is split with `numpy.random.SeedSequence` into a maze seed
-  and a controller seed for each run. Changing the controller seeds then never changes the mazes.
-- **Fair comparison:** the maze seeds depend only on the experiment seed and the run index.
-  Two controllers run with the same experiment seed see exactly the same mazes.
-- Each run file stores the full maze, its `origin` (with the seed) and its `metrics`.
-  `results.json` drops the single `map` block in favour of per-run maze data.
-  `results.csv` gains the maze seed and the main maze metric columns.
-- Option `--maze-per-run` (generated) versus a fixed `--maze NAME`.
-
-**Done when:**
-- `experiment --maze random --maze-per-run --runs 20` produces 20 different mazes
-- rerunning with the same seed reproduces them exactly
-- each run file replays on its own
+Rules and generators operate on the tile grid (`np.ndarray`), never on pellets or the start.
 
 ---
 
-## Later (not yet scheduled)
+## Step 5 — Rule framework and measurements
 
-- **Pac-Man-like generator:** coarse grid scaled up, mirrored, fully braided, one-tile corridors, thick walls,
-  and a decorative ghost house. Must pass the `pacman` tier.
-- **Tunnels:** portal pairs on `Maze`, used by `get_destination` and `get_valid_movements`.
-  BFS and controllers then get tunnels for free. Layout legend: matching letters on the edges.
-- **Ghosts:** seeded spawn positions with rules:
-  - on walkable tiles, outside the decorative house
-  - at least N steps (BFS distance) from Pac-Man's start
-  - no two ghosts on the same tile
-  - recorded in the run file
-- **Single-BFS nearest-pellet** (see `AGENTS.md` known points): about 4,000× faster on classic with identical results.
-- **Analysis metrics in experiment aggregates**, e.g. controller performance against loop count.
+**Why:** everything else (generation, repair, quality checks, experiment metrics) is built on
+rules that can say *where* they fail.
+
+- `mazes/grid.py`: helpers such as `walkable_mask(grid)`, `neighbour_counts(grid)` (4-neighbourhood),
+  `windows(mask, size)` (all-true k×k windows via slicing), `components(mask)`.
+- `rules/base.py`:
+
+  ```python
+  @dataclass(frozen=True)
+  class Violation:
+      rule: str
+      message: str
+      positions: tuple[Position, ...] = ()   # where; empty for global rules
+
+  class Rule(ABC):
+      name: ClassVar[str]
+
+      @abstractmethod
+      def violations(self, grid: np.ndarray) -> list[Violation]: ...
+
+      def holds_after_change(self, grid: np.ndarray, position: Position) -> bool:
+          """Incremental check after one tile changed. Default: full check.
+          Local rules override this with an O(1) check of the neighbourhood."""
+          return not self.violations(grid)
+  ```
+
+  Each rule is a frozen dataclass whose fields are its parameters, so it can be built from TOML and saved as JSON.
+  `RuleSet` holds rules and returns all violations. `HARD_RULES` are always included for generated mazes.
+- **Rules:**
+  - Hard: `size_bounds`, `connected`, `enclosed`.
+  - Local:
+    - `max_block(tile, size)`: no size×size window of the same tile.
+      `corridor, 2` gives one-tile corridors; `wall, k` keeps walls thinner than k.
+    - `no_diagonal_contact`: no checkerboard 2×2 window, i.e. two walkable tiles touching only at a corner.
+  - Structure: `max_dead_ends(count)`, `max_straight_run(length)`, `min_junction_share(share)`,
+    `min_loops(count)`, `walkable_fraction(min, max)`, `mirror_symmetric(axis)`.
+- `Maze` validation adds `size_bounds` (5–101). `small` and `classic` must still load.
+- `analysis.py`: `analyze(maze) -> MazeMetrics` (frozen dataclass). Measures:
+  - size, walkable count and fraction
+  - regions
+  - dead ends, junctions
+  - loops (cycle rank = edges − walkable tiles + regions)
+  - longest straight run
+  - largest corridor block, largest wall block
+  - enclosed, symmetry
+  - pellet count
+- Results: `maze_to_dict` adds `metrics`; bump `FORMAT_VERSION`.
+- CLI: turn `mazes [--show NAME]` into subcommands (`mazes list`, `mazes show NAME`) and add
+  `mazes check SPEC [--rules RECIPE]`, which prints metrics and violations with positions.
+
+**Done when:**
+- every rule has a passing and a failing tiny-layout test
+- `mazes check classic` reports only the tunnel-row `enclosed` violation
+- golden tests pass
+
+## Step 6 — Shapes and the lattice generator (topography only)
+
+**Why:** this generator meets most rules by construction instead of by luck.
+
+1. **Region:** a shape fills an H×W boolean mask.
+   - `rectangle`
+   - `ellipse`
+   - `blob` (seeded random connected shape; optional mirror)
+   - `layout` (mask taken from a layout file's non-void tiles)
+
+   The playable area is the mask shrunk by one tile (8-neighbourhood). The removed ring becomes `WALL`, everything outside becomes `VOID`.
+   **`enclosed` holds by construction.**
+2. **Lattice:** choose corridor row lines and column lines inside the playable area, with random gaps in `spacing = [min, max]` (min ≥ 2).
+   Nodes are line intersections inside the playable area; candidate edges are line segments fully inside it.
+   With gap ≥ 2 and width 1, **no corridor 2×2 and no diagonal contact hold by construction.**
+   The maximum gap bounds wall thickness.
+3. **Graph:**
+   - Seeded random spanning tree over the largest connected candidate component → **`connected` by construction.**
+   - Add a share `extra_loops` of the unused candidate edges.
+   - Optional mirroring (build half, reflect).
+4. **Repair driven by violations:**
+   - For `max_dead_ends`, `max_block(wall, k)`, `max_straight_run` and `min_loops`:
+     read the violation positions and add the nearest unused candidate edge, or remove a node on a run.
+     Repeat until the rules hold or no repair move remains.
+   - If repairs run out, raise an error that names the rule and suggests a parameter change.
+     Example: "max_dead_ends=0 needs spacing ≤ … for this shape".
+   - A quick feasibility check up front catches impossible combinations, such as a size too small for the spacing.
+5. **Rasterize:** edges become corridor tiles of `corridor_width`. Everything else in the playable area is `WALL`.
+6. **Final check:** `RuleSet.violations(grid)` must be empty. A failure here is a bug, not bad luck.
+
+Programmatic API in this step (recipes come in step 7):
+
+```python
+grid = generate_lattice(shape=..., size=(31, 31), params=LatticeParams(...), rules=rule_set, rng=rng)
+```
+
+**Done when:**
+- 200 seeds × three shapes × two rule sets pass the final check
+- the same seed gives an identical grid
+- a 101×101 maze generates in well under a second
+
+## Step 7 — Recipes, content placement, pipeline, CLI
+
+- **Content** (`generation/content.py`): placers take the finished grid and an rng.
+  - Pellets: `all_corridors` (default), `density(p)`, `exclude_near_start(distance)`.
+  - Start: `random`, `center` (walkable tile closest to the centre), `layout` (keep a layout's `P`).
+  - Same interface later for ghost spawns.
+  - Content never changes tiles.
+- **Seeds:** the maze seed is split with `SeedSequence` into shape, topography and content streams.
+  Changing the pellet placer never changes the topography, and changing the rules never changes the shape.
+- **`MazeRecipe`** (`generation/recipe.py`): name, description, size, shape, generator + params, rules, content.
+  - Loaded from TOML and validated with clear errors (unknown rule, bad parameter).
+  - `apply_overrides(recipe, ["size=41x41", "topography.extra_loops=0.3", "rules.max_block.wall.size=3"])`
+    applies `--maze-set` values.
+- **Pipeline:** `build_maze(recipe, seed) -> Maze`: shape → topography → final rule check → content → `Maze`.
+  `origin = MazeOrigin(source="generated", name=recipe.name, generator=…, params=<full resolved recipe>, seed=seed)`.
+  The origin also records the package version, because a generator change may change what a seed produces.
+  The saved topography keeps replay independent of that.
+- **Registry and maze specs** (one resolver for every command):
+
+  | Spec | Meaning |
+  |---|---|
+  | `classic` | layout in `mazes/layouts/` |
+  | `open-lattice` | recipe in `mazes/recipes/` (needs `--maze-seed`, default 0) |
+  | `my-favourite` | saved maze in `mazes/saved/` |
+  | `path/to/file.txt` / `.toml` / `.json` | one-off layout / recipe / saved maze |
+
+  Name clashes across the three folders are an error at registry build time.
+- **CLI:**
+  - `simulate / play / experiment --maze SPEC [--maze-seed N] [--maze-set KEY=VALUE ...]`
+  - `mazes list` shows layouts, recipes and saved mazes, with kind and size.
+  - `mazes show SPEC [--maze-seed N]` prints the layout and metrics.
+  - `mazes check SPEC [--rules RECIPE]`
+  - `mazes generate RECIPE --seed N [--count K] [--save NAME]` writes to `mazes/saved/`, which registers it.
+  - `mazes preview SPEC [--maze-seed N]` opens a Pygame view; violations highlighted (optional).
+- **Starter recipes:**
+  - `open-lattice`: any shape, loops, no dead ends.
+  - `wide-halls`: `corridor_width = 2`, no `max_block(corridor)`.
+  - `blob-lattice`: random shape.
+  - `classic-like`: symmetric, one-tile corridors, `max_block(wall, 5)`, decorative ghost house once step 10 exists.
+
+Example recipe (`mazes/recipes/open-lattice.toml`):
+
+```toml
+name = "open-lattice"
+description = "Generic loopy maze with no dead ends."
+
+[size]
+height = 31
+width = 31
+
+[shape]
+kind = "rectangle"
+
+[topography]
+generator = "lattice"
+spacing = [2, 4]
+corridor_width = 1
+extra_loops = 0.15
+mirror = "none"          # none | horizontal | vertical | both
+
+[[rules]]
+rule = "max_dead_ends"
+count = 0
+
+[[rules]]
+rule = "max_block"
+tile = "corridor"
+size = 2
+
+[[rules]]
+rule = "max_block"
+tile = "wall"
+size = 5
+
+[[rules]]
+rule = "no_diagonal_contact"
+
+[content.pellets]
+placer = "all_corridors"
+
+[content.start]
+placer = "center"
+```
+
+**Done when:**
+- `simulate --maze open-lattice --maze-seed 7 --visualize` works and the saved result replays
+- `mazes generate open-lattice --seed 7 --save demo` followed by `simulate --maze demo` uses the identical maze
+- the same seed with a different pellet placer gives the same topography (test)
+- bad recipes fail with messages that name the field
+
+## Step 8 — Experiments with a maze per run
+
+- `experiment --maze RECIPE` generates one maze per run from `derive_run_seeds(seed, i).maze_seed`
+  (the hook already exists). `--maze-seed N` instead fixes one generated maze for all runs.
+- Every run file holds the full maze, its origin (full recipe, seed, version) and its metrics.
+- `results.json` stores the recipe once at experiment level. `results.csv` gains `maze_seed`
+  and the main metric columns (walkable tiles, loops, dead ends, junction share, longest run).
+- Fairness is unchanged: maze seeds depend only on the experiment seed and run index.
+
+**Done when:**
+- 20 runs give 20 different mazes
+- rerunning reproduces them exactly
+- two controllers with the same seed get identical maze sequences (test)
+- any run file replays on its own
+
+## Step 9 — Sculpt generator (organic shapes)
+
+**Why:** lattice mazes look grid-like. Sculpt explores freely while **never leaving the space of valid mazes**.
+
+- Start from a valid grid (lattice output, or the playable area opened to corridors).
+- Repeatedly propose flipping one tile WALL↔CORRIDOR inside the playable area. Accept only if
+  every rule's `holds_after_change` passes. Local rules check a 3×3 or 4×4 neighbourhood in O(1).
+- **Connectivity stays local:**
+  - CORRIDOR→WALL is allowed only if the tile's walkable neighbours remain connected within its 3×3 neighbourhood.
+    This is a sufficient condition, so connectivity is never broken.
+  - WALL→CORRIDOR is allowed only next to an existing corridor.
+- Optional objective (targets for walkable fraction, loops, junction share) with simulated annealing.
+  Without one, it is a seeded random walk over valid mazes.
+- Global-only rules (`min_loops`, `mirror_symmetric`) are checked at the end, or kept by flipping mirrored pairs together.
+- The same recipe format applies: `generator = "sculpt"`, with `start_from = "lattice"` and its params.
+
+**Done when:**
+- every accepted step keeps the full rule check passing (a debug flag checks after every step)
+- 100 seeds pass
+- the output looks clearly non-lattice
+
+## Step 10 — Features for ghosts (when ghosts arrive)
+
+- **Reserved features** are placed after the shape and before topography, as fixed regions the generator builds around:
+  - decorative ghost house: a `GHOST_HOUSE` rectangle with a `GHOST_GATE` tile, a forced corridor ring around it
+  - later, tunnel portal endpoints
+- **Ghost spawn placer** in `content.py`:
+  - walkable tiles outside the house
+  - at least N BFS steps from the start
+  - distinct tiles
+  - seeded from the content stream; recorded in the run file
+
+---
+
+## Later
+
+- Single-BFS nearest-pellet (about 4,000× faster on classic, identical results).
+- Controller performance against maze metrics in experiment summaries.
+- Maze pools: generate K mazes once, run every controller on all of them.

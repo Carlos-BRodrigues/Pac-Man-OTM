@@ -2,12 +2,15 @@
 
 from typing import Any
 
+from pacman_otm.mazes.analysis import analyze
 from pacman_otm.mazes.maze import Maze
 from pacman_otm.mazes.origin import MazeOrigin
 
 
 def maze_to_dict(maze: Maze) -> dict[str, Any]:
+    # "metrics" is for reading results; loading ignores it and recomputes.
     return {
+        "metrics": analyze(maze).to_dict(),
         "origin": maze.origin.to_dict() if maze.origin is not None else None,
         "dimensions": [maze.height, maze.width],
         "topography": maze.topography.tolist(),

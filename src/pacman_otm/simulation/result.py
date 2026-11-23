@@ -14,7 +14,7 @@ from pacman_otm.statistics_.serialization import pretty_json
 from pacman_otm.controllers.controller import ControllerStatus
 
 # Bumped whenever the saved layout changes. 2: maze.origin, maze.dimensions.
-FORMAT_VERSION = 2
+FORMAT_VERSION = 3
 
 
 @dataclass

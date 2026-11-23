@@ -3,6 +3,7 @@ from collections.abc import Callable, Iterable
 
 import numpy as np
 
+from pacman_otm.mazes.grid import MAX_MAZE_SIZE, MIN_MAZE_SIZE
 from pacman_otm.mazes.origin import MazeOrigin
 from pacman_otm.mazes.tiles import TILE_RULES, Tile, TileRules
 from pacman_otm.simulation.actions import Action
@@ -130,6 +131,17 @@ class Maze:
             raise ValueError(
                 f"Topography contains unknown tile values {unknown}; "
                 f"known tiles are {known}."
+            )
+
+        height, width = grid.shape
+
+        if not (
+            MIN_MAZE_SIZE <= height <= MAX_MAZE_SIZE
+            and MIN_MAZE_SIZE <= width <= MAX_MAZE_SIZE
+        ):
+            raise ValueError(
+                f"Maze size {height}x{width} is out of bounds: rows and columns "
+                f"must be between {MIN_MAZE_SIZE} and {MAX_MAZE_SIZE}."
             )
 
         return grid.astype(np.uint8)

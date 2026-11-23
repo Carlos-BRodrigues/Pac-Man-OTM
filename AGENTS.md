@@ -22,7 +22,9 @@ in small verified steps.** Do not jump straight to large changes.
 Common commands:
 
 ```powershell
-python -m pacman_otm mazes                       # list mazes; --show NAME prints one
+python -m pacman_otm mazes                       # list mazes (same as: mazes list)
+python -m pacman_otm mazes show classic          # layout text + metrics
+python -m pacman_otm mazes check classic --rules rules.toml   # metrics + rule violations with positions
 python -m pacman_otm sprites                     # preview the player and death animations
 python -m pacman_otm simulate --controller nearest-pellet --visualize
 python -m pacman_otm simulate --maze small --controller random-walk --seed 7 --output run.json --show-history
@@ -53,6 +55,9 @@ Replay controls: Space play/pause, ←/→ step, Home/End jump, ↑/↓ speed, E
 | `mazes/tiles.py` | `Tile` enum and `TILE_RULES` (walkable, pellet allowed). Tile values are stored in results: never renumber. Behaviour comes from the rules, never from `== 0`. |
 | `mazes/maze.py` | `Maze`: immutable grid, start, pellets, `origin`; validates tiles, positions and pellet reachability; precomputed neighbour table (`MOVEMENTS` order). |
 | `mazes/layout.py`, `mazes/layouts/*.txt` | Text layouts (`# . o space P _ H -`): `parse_layout`, `load_layout`, `format_layout`. Trailing spaces are tiles. |
+| `mazes/grid.py` | Pure numpy helpers on a tile grid: masks, neighbour counts, k×k windows, components, straight runs, corridor chains. `MIN_MAZE_SIZE`/`MAX_MAZE_SIZE` (5–101). No `Maze` import. |
+| `mazes/rules/` | `Rule` (frozen dataclass; fields = parameters), `Violation` (rule, message, positions), `RuleSet`. `hard.py` (`HARD_RULES`: size_bounds, connected, enclosed), `local.py` (max_block, no_diagonal_contact), `structure.py` (dead ends, straight run, corridor length, junction share, loops, walkable fraction, mirror symmetry), `registry.py` (name → rule, built from TOML/JSON config with errors naming the field). Rules see tiles only. |
+| `mazes/analysis.py` | `analyze(maze) -> MazeMetrics`: measurements only, no thresholds. Saved under `maze.metrics` in results; recomputed on load. |
 | `mazes/origin.py`, `mazes/serialization.py` | `MazeOrigin` (how a maze was made: layout/generated, name, generator, params, seed); maze ↔ dict for results. |
 | `mazes/registry.py` | Every `layouts/*.txt` as a named maze; `resolve_maze(name or path)`; `DEFAULT_MAZE`. |
 | `experiments/seeding.py` | `derive_run_seeds(experiment_seed, run_index)` → independent maze and controller seeds. |
@@ -123,7 +128,8 @@ Dependency direction, lowest to highest — imports should only point downward:
 experiment aggregates if numeric, and check old result JSON files still load (or say clearly that they won't).
 
 **Add a maze**: drop a `.txt` layout in `mazes/layouts/`; it is registered under its file stem.
-`Maze` validates tiles, the start, pellet placement and reachability for you. A new tile type needs a
+`Maze` validates tiles, size (5–101 rows and columns), the start, pellet placement and reachability for you;
+`mazes check NAME` reports the hard rules and any extra `--rules`. A new tile type needs a
 `Tile` value, a `TILE_RULES` entry, a layout character and a renderer colour.
 
 **Change the result format**: bump `FORMAT_VERSION` in `simulation/result.py`. Old files are rejected

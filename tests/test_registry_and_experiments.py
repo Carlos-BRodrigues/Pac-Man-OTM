@@ -26,7 +26,7 @@ def test_resolve_by_name_and_by_path(tmp_path) -> None:
     assert resolve_maze("small").name == "small"
 
     path = tmp_path / "tiny.txt"
-    path.write_text("####\n#P.#\n####\n", encoding="utf-8")
+    path.write_text("#####\n#P.##\n#  ##\n#  ##\n#####\n", encoding="utf-8")
 
     maze = resolve_maze(str(path))
     assert maze.name == "tiny"
