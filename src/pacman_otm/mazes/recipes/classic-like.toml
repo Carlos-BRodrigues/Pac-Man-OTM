@@ -1,0 +1,41 @@
+name = "classic-like"
+description = "Left-right symmetric, one-tile corridors, long halls, no dead ends (ghost house comes with step 10)."
+
+[size]
+height = 31
+width = 28
+
+[topography]
+generator = "lattice"
+spacing = [2, 4]
+extra_loops = 0.15
+mirror = "horizontal"
+straightness = 0.5
+
+[[rules]]
+rule = "max_dead_ends"
+count = 0
+
+[[rules]]
+rule = "max_block"
+tile = "corridor"
+size = 2
+
+[[rules]]
+rule = "max_block"
+tile = "wall"
+size = 5
+
+[[rules]]
+rule = "no_diagonal_contact"
+
+[[rules]]
+rule = "max_corridor_length"
+length = 14
+
+[[rules]]
+rule = "mirror_symmetric"
+axis = "horizontal"
+
+[content.start]
+placer = "center"

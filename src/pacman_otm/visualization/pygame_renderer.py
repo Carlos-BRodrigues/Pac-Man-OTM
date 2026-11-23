@@ -1,3 +1,5 @@
+from collections.abc import Iterable
+
 import pygame
 
 from pacman_otm.mazes.maze import Maze
@@ -265,6 +267,27 @@ class PygameRenderer:
             overlay_text,
             overlay_text.get_rect(midright=(self.width - self.scale * 2, self.hud_px // 2)),
         )
+
+    def draw_preview(self, highlights: Iterable[Position], status: str) -> None:
+        """A maze without a run: pellets, Pac-Man at the start, highlighted tiles and a status line."""
+
+        self.screen.fill(self.theme.background)
+        self.screen.blit(self.background, (self.maze_x, self.hud_px))
+        self._draw_pellets(set(self.maze.initial_pellets))
+
+        tint = pygame.Surface((self.tile_px, self.tile_px), pygame.SRCALPHA)
+        tint.fill((*self.theme.highlight, self.theme.highlight_alpha))
+
+        for position in highlights:
+            self.screen.blit(tint, self._tile_pixel(position))
+
+        sprite = self.sprites.player(INITIAL_POSE.mouth, INITIAL_POSE.facing)
+        self._blit_sprite(sprite, self._tile_pixel(self.maze.pacman_start))
+
+        text = self.font.render(status, True, self.theme.text)
+        self.screen.blit(text, text.get_rect(midleft=(self.scale * 2, self.hud_px // 2)))
+
+        pygame.display.flip()
 
     # Events
 

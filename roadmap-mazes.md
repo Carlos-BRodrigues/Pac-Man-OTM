@@ -1,7 +1,7 @@
 # Roadmap — Arbitrary and Generated Mazes
 
-Status: steps 0–4 done (commit `32c1c1b`); step 5 done (`ea7ea19`); step 6 done (uncommitted).
-Steps 7–10 below are the agreed design for recipes, experiments and sculpting. Revised 2026-11-23; replaces the earlier steps 5–7.
+Status: steps 0–4 done (commit `32c1c1b`); step 5 (`ea7ea19`), step 6 (`fd6ba16`), step 7 done (uncommitted).
+Steps 8–10 below are the agreed design for experiments, sculpting and ghost features. Revised 2026-11-23; replaces the earlier steps 5–7.
 Added 2026-11-22: rule `max_corridor_length(length)` (step 5, done) and lattice params
 `straightness` and `node_dropout` (step 6); details in the implementation plan.
 Read `AGENTS.md` first; every rule there still applies.
@@ -67,6 +67,11 @@ three rules:
     are never re-added, which keeps repairs from oscillating.
   - Mirrored both ways on small blobs, about 1% of seeds fail with a `GenerationError` naming the rule.
   - 101×101 with strict rules: about 0.25–0.4 s (worst seen 0.8 s); open rules about 0.15 s.
+- **Step 7:** `content.py`, `recipe.py`, `pipeline.py`, `config.py`, registry of layouts/recipes/saved mazes,
+  `--maze-seed` / `--maze-set`, `mazes list | show | check | preview | generate`, five starter recipes.
+  Decisions: seeds split four ways (shape, topography, start, pellets); a layout `path` may be a registered layout
+  name; setting `shape.kind`, `topography.generator` or a `placer` override clears that table's other params;
+  saved mazes are named after `--save NAME` (the recipe name stays in the origin's params).
 - Also in place: `experiments/seeding.py` (`derive_run_seeds`) and `ExperimentRunner(maze_factory=…)`.
 
 ---

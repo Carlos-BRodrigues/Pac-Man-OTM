@@ -1,0 +1,28 @@
+name = "wide-halls"
+description = "Two-tile-wide corridors. Junction and loop counts are tile-level, so no degree rules here."
+
+[size]
+height = 33
+width = 33
+
+[topography]
+generator = "lattice"
+spacing = [3, 5]
+corridor_width = 2
+extra_loops = 0.1
+
+[[rules]]
+rule = "max_block"
+tile = "corridor"
+size = 3
+
+[[rules]]
+rule = "max_block"
+tile = "wall"
+size = 4
+
+[[rules]]
+rule = "no_diagonal_contact"
+
+[content.start]
+placer = "center"

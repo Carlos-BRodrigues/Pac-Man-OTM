@@ -1,0 +1,39 @@
+name = "open-lattice"
+description = "Generic loopy maze with no dead ends."
+
+[size]
+height = 31
+width = 31
+
+[shape]
+kind = "rectangle"
+
+[topography]
+generator = "lattice"
+spacing = [2, 4]
+corridor_width = 1
+extra_loops = 0.15
+mirror = "none"          # none | horizontal | vertical | both
+
+[[rules]]
+rule = "max_dead_ends"
+count = 0
+
+[[rules]]
+rule = "max_block"
+tile = "corridor"
+size = 2
+
+[[rules]]
+rule = "max_block"
+tile = "wall"
+size = 5
+
+[[rules]]
+rule = "no_diagonal_contact"
+
+[content.pellets]
+placer = "all_corridors"
+
+[content.start]
+placer = "center"

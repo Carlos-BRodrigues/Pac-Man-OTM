@@ -1,0 +1,36 @@
+name = "twisty"
+description = "Winding corridors, few loops, some dead ends; no pellets right next to the start."
+
+[size]
+height = 31
+width = 31
+
+[topography]
+generator = "lattice"
+spacing = [2, 4]
+extra_loops = 0.03
+straightness = -0.8
+
+[[rules]]
+rule = "max_dead_ends"
+count = 6
+
+[[rules]]
+rule = "max_block"
+tile = "corridor"
+size = 2
+
+[[rules]]
+rule = "max_block"
+tile = "wall"
+size = 5
+
+[[rules]]
+rule = "no_diagonal_contact"
+
+[content.pellets]
+placer = "exclude_near_start"
+distance = 2
+
+[content.start]
+placer = "random"

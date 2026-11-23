@@ -1,0 +1,37 @@
+name = "blob-lattice"
+description = "A random organic outline with irregular wall islands."
+
+[size]
+height = 41
+width = 51
+
+[shape]
+kind = "blob"
+fill = 0.6
+
+[topography]
+generator = "lattice"
+spacing = [2, 4]
+extra_loops = 0.12
+straightness = 0.2
+node_dropout = 0.15
+
+[[rules]]
+rule = "max_dead_ends"
+count = 0
+
+[[rules]]
+rule = "max_block"
+tile = "corridor"
+size = 2
+
+[[rules]]
+rule = "max_block"
+tile = "wall"
+size = 5
+
+[[rules]]
+rule = "no_diagonal_contact"
+
+[content.start]
+placer = "center"

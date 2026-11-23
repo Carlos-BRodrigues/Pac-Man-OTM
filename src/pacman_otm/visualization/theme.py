@@ -34,6 +34,9 @@ class Theme:
     text: Color = (225, 230, 240)
     target: Color = (120, 250, 120)
     path: Color = (120, 250, 120)
+    # Tiles flagged in 'mazes preview' (rule violations), drawn translucent.
+    highlight: Color = (235, 64, 52)
+    highlight_alpha: int = 120
 
     @property
     def sprite_offset(self) -> int:

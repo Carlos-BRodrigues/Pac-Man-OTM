@@ -25,6 +25,10 @@ Common commands:
 python -m pacman_otm mazes                       # list mazes (same as: mazes list)
 python -m pacman_otm mazes show classic          # layout text + metrics
 python -m pacman_otm mazes check classic --rules rules.toml   # metrics + rule violations with positions
+python -m pacman_otm mazes generate open-lattice --seed 0 --count 6   # gallery: ASCII + metrics per seed
+python -m pacman_otm mazes generate classic-like --seed 7 --save demo # saved maze, then: --maze demo
+python -m pacman_otm mazes preview blob-lattice --maze-seed 3         # window, violations highlighted
+python -m pacman_otm simulate --maze open-lattice --maze-seed 7 --maze-set size=41x41 --visualize
 python -m pacman_otm sprites                     # preview the player and death animations
 python -m pacman_otm simulate --controller nearest-pellet --visualize
 python -m pacman_otm simulate --maze small --controller random-walk --seed 7 --output run.json --show-history
@@ -35,8 +39,11 @@ python -m pytest                                  # needs: pip install -e ".[dev
 python -m pytest -m slow                          # long seed sweeps (skipped by default)
 ```
 
-`--maze NAME|PATH` (simulate, play, experiment) takes a registered name or a path to a `.txt` layout;
-the default is `classic` everywhere. In `experiment`, `--seed` is the experiment seed: run i gets a
+`--maze SPEC` (simulate, play, experiment, and the `mazes` subcommands) takes a registered name — a layout
+(`mazes/layouts/*.txt`), a recipe (`mazes/recipes/*.toml`) or a saved maze (`mazes/saved/*.json`) — or a path
+to such a file; the default is `classic` everywhere. A recipe is built from `--maze-seed N` (default 0), and
+`--maze-set KEY=VALUE` (repeatable) overrides recipe values. Recipe mazes are labelled `<recipe>-seed<N>`.
+`experiment` still uses one fixed maze for all runs (per-run mazes are roadmap step 8). In `experiment`, `--seed` is the experiment seed: run i gets a
 maze seed and a controller seed from `derive_run_seeds(seed, i)`, so different controllers run with
 the same `--seed` see the same maze sequence.
 
@@ -58,10 +65,12 @@ Replay controls: Space play/pause, ←/→ step, Home/End jump, ↑/↓ speed, E
 | `mazes/layout.py`, `mazes/layouts/*.txt` | Text layouts (`# . o space P _ H -`): `parse_layout`, `load_layout`, `format_layout`. Trailing spaces are tiles. |
 | `mazes/grid.py` | Pure numpy helpers on a tile grid: masks, neighbour counts, k×k windows, components, straight runs, corridor chains. `MIN_MAZE_SIZE`/`MAX_MAZE_SIZE` (5–101). No `Maze` import. |
 | `mazes/rules/` | `Rule` (frozen dataclass; fields = parameters), `Violation` (rule, message, positions), `RuleSet`. `hard.py` (`HARD_RULES`: size_bounds, connected, enclosed), `local.py` (max_block, no_diagonal_contact), `structure.py` (dead ends, straight run, corridor length, junction share, loops, walkable fraction, mirror symmetry), `registry.py` (name → rule, built from TOML/JSON config with errors naming the field). Rules see tiles only. |
-| `mazes/generation/` | Topography generation. `shapes.py`: region masks (rectangle, ellipse, blob, layout), `playable_area`, `frame_grid`, `trim_outer_wall` (hidden outer wall → void). `lattice.py`: `LatticeParams` + `generate_lattice(region, params, rules, rng)`: lines → candidate graph → spanning tree (straightness bias, node dropout, mirror orbits) → repairs driven by violation positions → final full rule check. `errors.py`: `GenerationError` (names the rule and a fix). `registry.py`: generator names. |
+| `mazes/config.py` | `ConfigError`, `convert` and key checks for plain config values; errors name the field. |
+| `mazes/generation/` | Topography generation. `shapes.py`: region masks (rectangle, ellipse, blob, layout), `playable_area`, `frame_grid`, `trim_outer_wall` (hidden outer wall → void). `lattice.py`: `LatticeParams` + `generate_lattice(region, params, rules, rng)`: lines → candidate graph → spanning tree (straightness bias, node dropout, mirror orbits) → repairs driven by violation positions → final full rule check. `errors.py`: `GenerationError` (names the rule and a fix). `registry.py`: generator names. `content.py`: start placers (center, random, layout) and pellet placers (all_corridors, density, exclude_near_start). `recipe.py`: `MazeRecipe`, `load_recipe` (TOML), `recipe_from_dict`, `apply_overrides` (`--maze-set`). `pipeline.py`: `build_maze(recipe, seed)` with separate seed streams for shape, topography, start and pellets; the origin records the full recipe, seed and package version. |
 | `mazes/analysis.py` | `analyze(maze) -> MazeMetrics`: measurements only, no thresholds. Saved under `maze.metrics` in results; recomputed on load. |
 | `mazes/origin.py`, `mazes/serialization.py` | `MazeOrigin` (how a maze was made: layout/generated, name, generator, params, seed); maze ↔ dict for results. |
-| `mazes/registry.py` | Every `layouts/*.txt` as a named maze; `resolve_maze(name or path)`; `DEFAULT_MAZE`. |
+| `mazes/recipes/*.toml` | Starter recipes (open-lattice, wide-halls, blob-lattice, classic-like, twisty), registered by file stem. `mazes/saved/` is written by `mazes generate --save`. |
+| `mazes/registry.py` | Layouts, recipes and saved mazes as named `MazeSource`s (`kind`, `build(seed)`); a name in two folders is an error. `resolve_maze_source(spec, overrides)`, `resolve_maze(spec, maze_seed, overrides)`, `save_maze` / `load_saved_maze`, `DEFAULT_MAZE`. |
 | `experiments/seeding.py` | `derive_run_seeds(experiment_seed, run_index)` → independent maze and controller seeds. |
 | `simulation/state.py` | `SimulationState`: position, remaining pellets, steps, termination. `copy()` / `to_dict()`. |
 | `simulation/engine.py` | `SimulationEngine`: the game rules. Executes an action, updates state, records history. Decides nothing. |
@@ -80,6 +89,7 @@ Replay controls: Space play/pause, ←/→ step, Home/End jump, ↑/↓ speed, E
 | `visualization/theme.py` | All colours and pixel geometry (8x8 base-pixel tiles, 13x13 sprites, wall recess). Change the look here. |
 | `visualization/maze_art.py`, `sprites.py` | Maze background rendered once from masks (recessed, rounded outline walls); procedural player and death sprites. Original art: do not copy arcade sprites. |
 | `visualization/animation.py` | Player poses derived from recorded positions only (chomp loop, facing, freeze when blocked); 4 in-between frames per step, display only. |
+| `maze_commands.py`, `cli_types.py` | The `mazes` command family and the shared `--maze/--maze-seed/--maze-set` options; argparse types. |
 | `cli.py` | Argument parsing and wiring. No logic beyond assembling components. |
 
 ## Architectural rules (do not break these)
@@ -129,7 +139,8 @@ Dependency direction, lowest to highest — imports should only point downward:
 **Add a metric**: add the field to `SimulationMetrics`, compute it in `from_engine`, add it to the
 experiment aggregates if numeric, and check old result JSON files still load (or say clearly that they won't).
 
-**Add a maze**: drop a `.txt` layout in `mazes/layouts/`; it is registered under its file stem.
+**Add a maze**: drop a `.txt` layout in `mazes/layouts/` or a `.toml` recipe in `mazes/recipes/`; it is registered
+under its file stem (see `recipes/open-lattice.toml` for every recipe section).
 `Maze` validates tiles, size (5–101 rows and columns), the start, pellet placement and reachability for you;
 `mazes check NAME` reports the hard rules and any extra `--rules`. A new tile type needs a
 `Tile` value, a `TILE_RULES` entry, a layout character and a renderer colour.

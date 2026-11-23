@@ -17,6 +17,9 @@ from pacman_otm.mazes.tiles import Tile
 
 Position = tuple[int, int]
 
+# Every *.txt in this directory is a named maze (see mazes/registry.py).
+LAYOUTS_DIR = Path(__file__).parent / "layouts"
+
 # character -> (tile, has pellet)
 LEGEND: frozendict[str, tuple[Tile, bool]] = frozendict(
     {

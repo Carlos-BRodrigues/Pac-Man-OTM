@@ -2,16 +2,16 @@ import argparse
 from datetime import datetime
 from pathlib import Path
 
-from pacman_otm.mazes.analysis import analyze
-from pacman_otm.mazes.layout import format_layout
-from pacman_otm.mazes.rules.hard import HARD_RULES
-from pacman_otm.mazes.rules.registry import RuleConfigError, rules_from_toml
-from pacman_otm.mazes.registry import (
-    DEFAULT_MAZE,
-    MazeSpecError,
-    create_maze_registry,
-    resolve_maze,
+from pacman_otm.cli_types import non_negative_int, positive_int
+from pacman_otm.maze_commands import (
+    add_maze_argument,
+    add_mazes_parser,
+    load_maze,
+    maze_label,
 )
+from pacman_otm.mazes.config import ConfigError
+from pacman_otm.mazes.generation.errors import GenerationError
+from pacman_otm.mazes.registry import MazeSpecError
 from pacman_otm.controllers.manual.manual import ManualController
 from pacman_otm.simulation.engine import SimulationEngine
 from pacman_otm.simulation.runner import run_simulation
@@ -62,7 +62,7 @@ def save_result(
 
 
 def run_simulate(args: argparse.Namespace) -> None:
-    maze = resolve_maze(args.maze)
+    source, maze = load_maze(args.maze, args)
     engine = SimulationEngine(maze)
     controller = create_controller(args.controller, maze, args.seed)
 
@@ -93,11 +93,11 @@ def run_simulate(args: argparse.Namespace) -> None:
         for entry in result.history_summary():
             print(entry)
 
-    save_result(result, args, label=f"{args.controller}_{maze.name}")
+    save_result(result, args, label=f"{args.controller}_{maze_label(source, maze, args.maze_seed)}")
 
 
 def run_play(args: argparse.Namespace) -> None:
-    maze = resolve_maze(args.maze)
+    source, maze = load_maze(args.maze, args)
     engine = SimulationEngine(maze)
 
     renderer = PygameRenderer(maze, scale=args.scale)
@@ -123,15 +123,17 @@ def run_play(args: argparse.Namespace) -> None:
         visualizer.close()
 
     print(result.metrics)
-    save_result(result, args, label=f"manual_{maze.name}")
+    save_result(result, args, label=f"manual_{maze_label(source, maze, args.maze_seed)}")
 
 
 def run_experiment(args: argparse.Namespace) -> None:
-    maze = resolve_maze(args.maze)
-    name = args.name or f"{args.controller}_{maze.name}"
+    # One fixed maze for every run (a recipe maze from --maze-seed); per-run mazes come in step 8.
+    source, maze = load_maze(args.maze, args)
+    label = maze_label(source, maze, args.maze_seed)
+    name = args.name or f"{args.controller}_{label}"
 
     print(
-        f"Experiment '{name}': controller={args.controller}  maze={maze.name}  "
+        f"Experiment '{name}': controller={args.controller}  maze={label}  "
         f"runs={args.runs}  seed={args.seed}"
     )
 
@@ -156,7 +158,7 @@ def run_experiment(args: argparse.Namespace) -> None:
         ),
         controller_name=args.controller,
         experiment_name=name,
-        maze_label=maze.name,
+        maze_label=label,
         output_root=args.output_dir,
         seed=args.seed,
         max_steps=args.max_steps,
@@ -203,100 +205,9 @@ def run_sprites(args: argparse.Namespace) -> None:
     run_sprite_preview(scale=args.scale if args.scale is not None else 6)
 
 
-def print_metrics(maze) -> None:
-    for key, value in analyze(maze).to_dict().items():
-        shown = f"{value:.3f}" if isinstance(value, float) else value
-        print(f"  {key:<24}{shown}")
-
-
-def run_mazes_show(args: argparse.Namespace) -> None:
-    maze = resolve_maze(args.spec)
-    print(
-        f"{maze.name}: {maze.height}x{maze.width}, "
-        f"{len(maze.initial_pellets)} pellets, start {maze.pacman_start}"
-    )
-    print(format_layout(maze), end="")
-    print("metrics:")
-    print_metrics(maze)
-
-
-def run_mazes_check(args: argparse.Namespace) -> None:
-    maze = resolve_maze(args.spec)
-    rules = HARD_RULES
-
-    if args.rules is not None:
-        path = Path(args.rules)
-
-        if not path.is_file():
-            raise RuleConfigError(f"Rules file '{path}' does not exist.")
-
-        rules = rules + rules_from_toml(path)
-
-    print(f"{maze.name}: {maze.height}x{maze.width}")
-    print("metrics:")
-    print_metrics(maze)
-
-    print("rules:")
-    violations = rules.violations(maze.topography)
-    failed = {violation.rule for violation in violations}
-
-    for rule in rules:
-        print(f"  {'FAIL' if rule.describe() in failed else 'ok':<6}{rule.describe()}")
-
-    if not violations:
-        print("No violations.")
-        return
-
-    print(f"violations ({len(violations)}):")
-
-    for violation in violations:
-        print(f"  {violation.rule}: {violation.message}")
-
-        if violation.positions:
-            shown = ", ".join(str(position) for position in violation.positions[:args.max_positions])
-            more = len(violation.positions) - args.max_positions
-            suffix = f" ... and {more} more" if more > 0 else ""
-            print(f"    at {shown}{suffix}")
-
-    raise SystemExit(1)
-
-
-def run_mazes_list(args: argparse.Namespace) -> None:
-    registry = create_maze_registry()
-
-    print(f"{'name':<16}{'size':>8}{'walkable':>10}{'pellets':>9}")
-
-    for name in registry.names():
-        maze = registry.create(name)
-        size = f"{maze.height}x{maze.width}"
-        default = "  (default)" if name == DEFAULT_MAZE else ""
-        print(
-            f"{name:<16}{size:>8}{len(maze.walkable_positions()):>10}"
-            f"{len(maze.initial_pellets):>9}{default}"
-        )
-
-
 def create_controller(name, maze, seed=42):
     registry = create_controller_registry()
     return registry.create(name, maze, seed)
-
-
-def non_negative_int(text: str) -> int:
-    value = int(text)
-
-    if value < 0:
-        raise argparse.ArgumentTypeError(f"must be >= 0, got {value}")
-
-    return value
-
-
-def positive_int(text: str) -> int:
-    value = int(text)
-
-    if value <= 0:
-        raise argparse.ArgumentTypeError(f"must be > 0, got {value}")
-
-    return value
 
 
 def add_scale_argument(parser: argparse.ArgumentParser) -> None:
@@ -305,18 +216,6 @@ def add_scale_argument(parser: argparse.ArgumentParser) -> None:
         type=positive_int,
         default=None,
         help="Pixel scale of the 8x8 tiles (whole number). Default: the largest that fits the screen.",
-    )
-
-
-def add_maze_argument(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--maze",
-        metavar="NAME|PATH",
-        default=DEFAULT_MAZE,
-        help=(
-            f"Maze name ({', '.join(create_maze_registry().names())}) or a path to "
-            f"a .txt layout. Default: {DEFAULT_MAZE}. See the 'mazes' command."
-        ),
     )
 
 
@@ -483,56 +382,13 @@ def main() -> None:
     sprites_parser.set_defaults(func=run_sprites)
 
     # MAZES
-    mazes_parser = subparsers.add_parser(
-        "mazes",
-        help="List, show or check mazes (default: list).",
-    )
-    # 'mazes' alone lists, as before.
-    mazes_parser.set_defaults(func=run_mazes_list)
-    mazes_subparsers = mazes_parser.add_subparsers(dest="mazes_command")
-
-    mazes_list_parser = mazes_subparsers.add_parser(
-        "list",
-        help="List the available mazes.",
-    )
-    mazes_list_parser.set_defaults(func=run_mazes_list)
-
-    mazes_show_parser = mazes_subparsers.add_parser(
-        "show",
-        help="Print a maze as layout text, with its metrics.",
-    )
-    mazes_show_parser.add_argument("spec", metavar="NAME|PATH")
-    mazes_show_parser.set_defaults(func=run_mazes_show)
-
-    mazes_check_parser = mazes_subparsers.add_parser(
-        "check",
-        help="Check a maze against the hard rules (and optional extra rules).",
-        description=(
-            "Print a maze's metrics and its rule violations with positions. "
-            "The hard rules (size_bounds, connected, enclosed) are always checked. "
-            "Exits with status 1 if any rule fails."
-        ),
-    )
-    mazes_check_parser.add_argument("spec", metavar="NAME|PATH")
-    mazes_check_parser.add_argument(
-        "--rules",
-        metavar="FILE.toml",
-        default=None,
-        help="TOML file whose [[rules]] tables are checked as well.",
-    )
-    mazes_check_parser.add_argument(
-        "--max-positions",
-        type=positive_int,
-        default=10,
-        help="Positions shown per violation. Default: 10.",
-    )
-    mazes_check_parser.set_defaults(func=run_mazes_check)
+    add_mazes_parser(subparsers, add_scale_argument)
 
     args = parser.parse_args()
 
     try:
         args.func(args)
-    except (MazeSpecError, RuleConfigError) as error:
+    except (MazeSpecError, ConfigError, GenerationError) as error:
         parser.error(str(error))
 
 
