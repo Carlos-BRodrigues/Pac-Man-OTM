@@ -14,7 +14,7 @@ from pacman_otm.mazes.grid import straight_runs, walkable_mask
 from pacman_otm.mazes.registry import LAYOUTS_DIR
 from pacman_otm.mazes.rules.base import RuleSet
 from pacman_otm.mazes.rules.hard import HARD_RULES
-from pacman_otm.mazes.rules.local import MaxBlock, NoDiagonalContact
+from pacman_otm.mazes.rules.local import MaxBlock, MinWallThickness, NoDiagonalContact
 from pacman_otm.mazes.rules.structure import (
     MaxCorridorLength,
     MaxDeadEnds,
@@ -194,6 +194,12 @@ def test_layout_shape(tmp_path) -> None:
             "conflicts with corridor_width = 2",
         ),
         (LatticeParams(), [MirrorSymmetric(axis="vertical")], "needs topography.mirror = 'vertical'"),
+        (LatticeParams(), [MinWallThickness(size=2)], r"spacing min >= 3 \(now 2\)"),
+        (
+            LatticeParams(corridor_width=2, spacing=(3, 5)),
+            [MinWallThickness(size=2)],
+            r"spacing min >= 4 \(now 3\)",
+        ),
     ],
 )
 def test_infeasible_combinations_are_caught_up_front(params, rules, message: str) -> None:
@@ -260,3 +266,13 @@ def test_generated_grid_contains_only_frame_and_corridor_tiles() -> None:
     grid = generate("blob", seed=2, rules=STRICT)
 
     assert set(np.unique(grid).tolist()) <= {Tile.CORRIDOR, Tile.WALL, Tile.VOID}
+
+
+@pytest.mark.parametrize("shape", SHAPES)
+def test_min_wall_thickness_holds_by_construction(shape: str) -> None:
+    rules = OPEN + RuleSet([MinWallThickness(size=2), MaxBlock(tile="wall", size=5)])
+    params = LatticeParams(spacing=(3, 5), node_dropout=0.15, extra_loops=0.15)
+
+    for seed in range(20):
+        grid = generate(shape, seed, params=params, rules=rules)
+        assert not MinWallThickness(size=2).violations(grid)

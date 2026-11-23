@@ -33,7 +33,7 @@ from pacman_otm.mazes.generation.shapes import (
 from pacman_otm.mazes.grid import MAX_MAZE_SIZE, MIN_MAZE_SIZE, Position
 from pacman_otm.mazes.rules.base import Rule, RuleSet, Violation
 from pacman_otm.mazes.rules.hard import HARD_RULES
-from pacman_otm.mazes.rules.local import MaxBlock
+from pacman_otm.mazes.rules.local import MaxBlock, MinWallThickness
 from pacman_otm.mazes.rules.structure import (
     MaxCorridorLength,
     MaxDeadEnds,
@@ -197,7 +197,7 @@ def check_feasibility(region: np.ndarray, params: LatticeParams, rules: RuleSet)
             )
 
     corridor = params.corridor_width
-    _, gap_max = params.spacing
+    gap_min, gap_max = params.spacing
 
     for rule in rules:
         if isinstance(rule, MaxBlock) and rule.tile == "corridor" and rule.size <= corridor:
@@ -222,6 +222,15 @@ def check_feasibility(region: np.ndarray, params: LatticeParams, rules: RuleSet)
             raise GenerationError(
                 f"{rule.describe()} needs topography.spacing max <= {rule.length - 1} "
                 f"(now {gap_max}): one segment between two junctions is spacing + 1 tiles."
+            )
+
+        # Parallel lines spacing apart leave walls spacing - corridor_width thick, and every
+        # lattice cell then holds a wall block at least that big, so the rule holds by construction.
+        if isinstance(rule, MinWallThickness) and gap_min - corridor < rule.size:
+            raise GenerationError(
+                f"{rule.describe()} needs topography.spacing min >= "
+                f"{rule.size + corridor} (now {gap_min}): the wall between two lines is "
+                f"spacing - corridor_width tiles thick."
             )
 
         if isinstance(rule, MirrorSymmetric):

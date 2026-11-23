@@ -19,41 +19,38 @@ in small verified steps.** Do not jump straight to large changes.
 - Python **>= 3.15** (the code uses the built-in `frozendict`). Dependencies: `numpy`, `pygame-ce`.
 - Source layout: package lives in `src/pacman_otm`. Install for development with `pip install -e .`
 
-Common commands:
+Common commands (full reference: [docs/cli.md](docs/cli.md); recipes: [docs/recipes.md](docs/recipes.md)):
 
 ```powershell
-python -m pacman_otm mazes                       # list mazes (same as: mazes list)
-python -m pacman_otm mazes show classic          # layout text + metrics
-python -m pacman_otm mazes check classic --rules rules.toml   # metrics + rule violations with positions
-python -m pacman_otm mazes generate open-lattice --seed 0 --count 6   # gallery: ASCII + metrics per seed
-python -m pacman_otm mazes generate classic-like --seed 7 --save demo # saved maze, then: --maze demo
-python -m pacman_otm mazes preview blob-lattice --maze-seed 3         # window, violations highlighted
-python -m pacman_otm simulate --maze open-lattice --maze-seed 7 --maze-set size=41x41 --visualize
-python -m pacman_otm sprites                     # preview the player and death animations
-python -m pacman_otm simulate --controller nearest-pellet --visualize
-python -m pacman_otm simulate --maze small --controller random-walk --seed 7 --output run.json --show-history
+python -m pacman_otm mazes list                                   # layouts, recipes, saved mazes
+python -m pacman_otm mazes generate open-lattice --count 6        # gallery of random mazes
+python -m pacman_otm mazes preview blob-lattice                   # one random maze in a window
+python -m pacman_otm mazes save twisty my-twisty --maze-seed 4 --layout   # editable layout in mazes/layouts/
+python -m pacman_otm simulate --maze twisty --visualize           # random maze, not saved
+python -m pacman_otm simulate --maze open-lattice --maze-seed 7 --save
 python -m pacman_otm play --maze small
-python -m pacman_otm experiment --controller random-walk --runs 20 --seed 42
-python -m pacman_otm replay run.json
+python -m pacman_otm experiment --maze open-lattice --runs 20 --seed 42 --visualize
+python -m pacman_otm replay results/nearest-pellet_open-lattice   # every run of an experiment
 python -m pytest                                  # needs: pip install -e ".[dev]"
 python -m pytest -m slow                          # long seed sweeps (skipped by default)
 ```
 
-`--maze SPEC` (simulate, play, experiment, and the `mazes` subcommands) takes a registered name — a layout
-(`mazes/layouts/*.txt`), a recipe (`mazes/recipes/*.toml`) or a saved maze (`mazes/saved/*.json`) — or a path
-to such a file; the default is `classic` everywhere. A recipe is built from `--maze-seed N` (default 0), and
-`--maze-set KEY=VALUE` (repeatable) overrides recipe values. Recipe mazes are labelled `<recipe>-seed<N>`.
-`experiment` still uses one fixed maze for all runs (per-run mazes are roadmap step 8). In `experiment`, `--seed` is the experiment seed: run i gets a
-maze seed and a controller seed from `derive_run_seeds(seed, i)`, so different controllers run with
-the same `--seed` see the same maze sequence.
-
-`simulate` and `play` always save to `results/` (auto-named `<controller>_<maze>_<timestamp>.json`, or
-`--output NAME`; `--no-save` to skip). `replay` also looks up bare names in `results/`.
-Play controls: after a 2 s "READY!" hold, Pac-Man always moves (starting left); arrows/WASD change direction, and a turn pressed
-early is taken at the next opening. Esc quits.
-
-Replay controls: Space play/pause, ←/→ step, Home/End jump, ↑/↓ speed, Esc quit.
-`simulate`, `play`, `replay` and `sprites` take `--scale N` (whole-number pixel scale; default: the largest that fits the screen).
+Behaviour worth knowing before changing the CLI:
+- `--maze SPEC` is a layout, recipe or saved-maze name, or a `.txt`/`.toml`/`.json` path (default `classic`).
+  A recipe without `--maze-seed` gets a random seed, printed and recorded in the result. `--maze-set KEY=VALUE`
+  overrides recipe values. Recipe sizes may be ranges; the size is drawn from the maze seed.
+- `experiment`: `--seed` is the experiment seed; run i gets maze and controller seeds from
+  `derive_run_seeds(seed, i)`, so controllers with the same `--seed` see the same mazes. A recipe without
+  `--maze-seed` gives every run its own maze. `--visualize` shows runs live; closing the window stops the
+  experiment (`stopped_early` in `results.json`). Experiments always save.
+- `simulate` and `play` save only with `--save` (auto-named `<controller>_<maze>_<timestamp>.json` in `results/`)
+  or `--output NAME`.
+- `replay` takes a result file or an experiment folder (bare names are looked up in `results/`). Controls:
+  Space play/pause, ←/→ step, Home/End jump, ↑/↓ speed, PageDown/`]` and PageUp/`[` next/previous run,
+  A auto-advance, Esc quit.
+- Play controls: after a 2 s "READY!" hold, Pac-Man always moves (starting left); arrows/WASD change direction,
+  and a turn pressed early is taken at the next opening. Esc quits.
+- `simulate`, `play`, `replay`, `experiment`, `mazes preview` and `sprites` take `--scale N`.
 
 ## Package map
 
@@ -64,7 +61,7 @@ Replay controls: Space play/pause, ←/→ step, Home/End jump, ↑/↓ speed, E
 | `mazes/maze.py` | `Maze`: immutable grid, start, pellets, `origin`; validates tiles, positions and pellet reachability; precomputed neighbour table (`MOVEMENTS` order). |
 | `mazes/layout.py`, `mazes/layouts/*.txt` | Text layouts (`# . o space P _ H -`): `parse_layout`, `load_layout`, `format_layout`. Trailing spaces are tiles. |
 | `mazes/grid.py` | Pure numpy helpers on a tile grid: masks, neighbour counts, k×k windows, components, straight runs, corridor chains. `MIN_MAZE_SIZE`/`MAX_MAZE_SIZE` (5–101). No `Maze` import. |
-| `mazes/rules/` | `Rule` (frozen dataclass; fields = parameters), `Violation` (rule, message, positions), `RuleSet`. `hard.py` (`HARD_RULES`: size_bounds, connected, enclosed), `local.py` (max_block, no_diagonal_contact), `structure.py` (dead ends, straight run, corridor length, junction share, loops, walkable fraction, mirror symmetry), `registry.py` (name → rule, built from TOML/JSON config with errors naming the field). Rules see tiles only. |
+| `mazes/rules/` | `Rule` (frozen dataclass; fields = parameters), `Violation` (rule, message, positions), `RuleSet`. `hard.py` (`HARD_RULES`: size_bounds, connected, enclosed), `local.py` (max_block, min_wall_thickness, no_diagonal_contact), `structure.py` (dead ends, straight run, corridor length, junction share, loops, walkable fraction, mirror symmetry), `registry.py` (name → rule, built from TOML/JSON config with errors naming the field). Rules see tiles only. |
 | `mazes/config.py` | `ConfigError`, `convert` and key checks for plain config values; errors name the field. |
 | `mazes/generation/` | Topography generation. `shapes.py`: region masks (rectangle, ellipse, blob, layout), `playable_area`, `frame_grid`, `trim_outer_wall` (hidden outer wall → void). `lattice.py`: `LatticeParams` + `generate_lattice(region, params, rules, rng)`: lines → candidate graph → spanning tree (straightness bias, node dropout, mirror orbits) → repairs driven by violation positions → final full rule check. `errors.py`: `GenerationError` (names the rule and a fix). `registry.py`: generator names. `content.py`: start placers (center, random, layout) and pellet placers (all_corridors, density, exclude_near_start). `recipe.py`: `MazeRecipe`, `load_recipe` (TOML), `recipe_from_dict`, `apply_overrides` (`--maze-set`). `pipeline.py`: `build_maze(recipe, seed)` with separate seed streams for shape, topography, start and pellets; the origin records the full recipe, seed and package version. |
 | `mazes/analysis.py` | `analyze(maze) -> MazeMetrics`: measurements only, no thresholds. Saved under `maze.metrics` in results; recomputed on load. |
@@ -84,7 +81,9 @@ Replay controls: Space play/pause, ←/→ step, Home/End jump, ↑/↓ speed, E
 | `simulation/result.py` | `SimulationResult`: the complete recorded run (states, actions, statuses, metrics, maze) + JSON I/O. |
 | `simulation/replay.py`, `frame.py` | `ReplayPlayer` navigates a `SimulationResult` only. `SimulationFrame` = state + action + status. |
 | `statistics_/` | `SimulationMetrics` (aggregate numbers) and `pretty_json`. |
-| `experiments/runner.py` | Batch runs with seeds; writes per-run JSON plus `results.json` / `results.csv` aggregates. |
+| `experiments/runner.py` | Batch runs with seeds; writes per-run JSON plus `results.json` / `results.csv` aggregates. Each run record carries `maze_seed` (the seed that built its maze) and `maze_*` metric columns; `maze_info` (e.g. the recipe of per-run mazes) is written once under `experiment`. |
+| `simulation/replay.py` `ResultSequence` | Runs to replay in order: one result file or an experiment folder (`runs/*/result.json`), loaded lazily. |
+| `visualization/experiment.py`, `preview.py` | `ExperimentVisualizer` (the runner's `on_run_start`: a live visualizer per run, a new maze each time) and `run_maze_preview`. |
 | `visualization/` | Pygame renderer, live visualizer (an `on_frame` callback), replay visualizer, `keyboard.py` (action source for `play`). Draws frames and reads input, no game rules. |
 | `visualization/theme.py` | All colours and pixel geometry (8x8 base-pixel tiles, 13x13 sprites, wall recess). Change the look here. |
 | `visualization/maze_art.py`, `sprites.py` | Maze background rendered once from masks (recessed, rounded outline walls); procedural player and death sprites. Original art: do not copy arcade sprites. |

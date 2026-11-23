@@ -1,7 +1,7 @@
 # Roadmap — Arbitrary and Generated Mazes
 
-Status: steps 0–4 done (commit `32c1c1b`); step 5 (`ea7ea19`), step 6 (`fd6ba16`), step 7 done (uncommitted).
-Steps 8–10 below are the agreed design for experiments, sculpting and ghost features. Revised 2026-11-23; replaces the earlier steps 5–7.
+Status: steps 0–4 done (commit `32c1c1b`); step 5 (`ea7ea19`), step 6 (`fd6ba16`), step 7 (`ff826d8`),
+step 8 done (uncommitted). Steps 9–10 below are the agreed design for sculpting and ghost features. Revised 2026-11-23; replaces the earlier steps 5–7.
 Added 2026-11-22: rule `max_corridor_length(length)` (step 5, done) and lattice params
 `straightness` and `node_dropout` (step 6); details in the implementation plan.
 Read `AGENTS.md` first; every rule there still applies.
@@ -72,6 +72,19 @@ three rules:
   Decisions: seeds split four ways (shape, topography, start, pellets); a layout `path` may be a registered layout
   name; setting `shape.kind`, `topography.generator` or a `placer` override clears that table's other params;
   saved mazes are named after `--save NAME` (the recipe name stays in the origin's params).
+- **Step 8:** per-run recipe mazes in `experiment` (`maze_commands.experiment_mazes`), `maze_info` and `maze_*`
+  metric columns in `ExperimentRunner`. `maze_seed` in run records is the seed that built the maze. A run whose
+  maze cannot be generated stops the experiment with an error naming the seed (no silent skipping).
+- **Before step 9 (2026-11-23):** a recipe without `--maze-seed` gets a random, printed seed (simulate, play,
+  mazes show/check/preview/generate); `experiment --visualize`; `ExperimentRunner(on_run_start=…)`;
+  recipe guide in `docs/recipes.md`.
+- **Also before step 9:** recipe size ranges (`height = [11, 41]`, drawn from a fifth seed stream, so existing
+  recipes and seeds make the same mazes as before); `replay` of experiment folders with run navigation and
+  auto-advance (`ResultSequence`); `mazes save SPEC NAME|PATH [--layout]` (editable layouts); `simulate`/`play`
+  save only with `--save`/`--output`; CLI guide in `docs/cli.md`.
+- **Rule `min_wall_thickness(size)`:** no wall thinner than `size` between corridors (border, void and ghost house
+  excepted, so `classic` passes size 2). Lattice meets it by construction with `spacing` min ≥ size + corridor_width,
+  checked up front. `classic-like` now uses it with `spacing = [3, 5]`, so its mazes differ from before.
 - Also in place: `experiments/seeding.py` (`derive_run_seeds`) and `ExperimentRunner(maze_factory=…)`.
 
 ---

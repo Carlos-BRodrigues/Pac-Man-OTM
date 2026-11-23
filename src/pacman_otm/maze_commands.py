@@ -7,13 +7,18 @@ Wiring and printing only; mazes, rules and recipes do the work.
 """
 
 import argparse
-from dataclasses import replace
+import re
+import secrets
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any
 
 from pacman_otm.cli_types import non_negative_int, positive_int
 from pacman_otm.mazes.analysis import analyze
-from pacman_otm.mazes.layout import format_layout
+from pacman_otm.mazes.layout import LAYOUTS_DIR, format_layout
 from pacman_otm.mazes.maze import Maze
+from pacman_otm.mazes.origin import MazeOrigin
 from pacman_otm.mazes.registry import (
     DEFAULT_MAZE,
     SAVED_DIR,
@@ -28,14 +33,24 @@ from pacman_otm.mazes.rules.hard import HARD_RULES
 from pacman_otm.mazes.rules.registry import RuleConfigError, rules_from_toml
 
 
-def add_maze_options(parser: argparse.ArgumentParser, seed_help: str | None = None) -> None:
+RANDOM_SEED_HELP = (
+    "Seed for a recipe maze. Default: a random seed, printed so the maze can be "
+    "repeated. Ignored by layouts and saved mazes."
+)
+
+
+def add_maze_options(
+    parser: argparse.ArgumentParser,
+    seed_default: int | None = None,
+    seed_help: str = RANDOM_SEED_HELP,
+) -> None:
     """--maze-seed and --maze-set, for any command that takes a maze."""
 
     parser.add_argument(
         "--maze-seed",
         type=non_negative_int,
-        default=0,
-        help=seed_help or "Seed for a recipe maze (ignored by layouts and saved mazes). Default: 0.",
+        default=seed_default,
+        help=seed_help,
     )
     parser.add_argument(
         "--maze-set",
@@ -49,7 +64,7 @@ def add_maze_options(parser: argparse.ArgumentParser, seed_help: str | None = No
     )
 
 
-def add_maze_argument(parser: argparse.ArgumentParser) -> None:
+def add_maze_argument(parser: argparse.ArgumentParser, **seed_options) -> None:
     parser.add_argument(
         "--maze",
         metavar="SPEC",
@@ -60,17 +75,90 @@ def add_maze_argument(parser: argparse.ArgumentParser) -> None:
             f"See 'mazes list'."
         ),
     )
-    add_maze_options(parser)
+    add_maze_options(parser, **seed_options)
 
 
-def load_maze(spec: str, args: argparse.Namespace) -> tuple[MazeSource, Maze]:
+def random_maze_seed() -> int:
+    """A fresh seed from the OS. Only ever used when no seed was given, and always printed."""
+    return secrets.randbelow(2**32)
+
+
+def choose_maze_seed(source: MazeSource, seed: int | None) -> int:
+    """The given seed, or for a recipe without one, a random seed that is announced."""
+
+    if seed is not None:
+        return seed
+
+    if not source.generated:
+        return 0
+
+    seed = random_maze_seed()
+    print(f"Maze seed: {seed}  (repeat this maze with --maze-seed {seed})")
+    return seed
+
+
+def load_maze(spec: str, args: argparse.Namespace) -> tuple[MazeSource, Maze, int]:
+    """The maze of --maze/--maze-seed/--maze-set, and the seed it was built from."""
+
     source = resolve_maze_source(spec, args.maze_set)
-    return source, source.build(args.maze_seed)
+    seed = choose_maze_seed(source, args.maze_seed)
+    return source, source.build(seed), seed
 
 
 def maze_label(source: MazeSource, maze: Maze, seed: int) -> str:
     """Used in result file names: a recipe maze is named with its seed."""
     return f"{maze.name}-seed{seed}" if source.generated else maze.name
+
+
+@dataclass(frozen=True)
+class ExperimentMazes:
+    """The mazes of an experiment: a factory from the run's maze seed, and how to describe them."""
+
+    factory: Callable[[int], Maze]
+    label: str
+    per_run: bool
+    # Written once into results.json.
+    info: dict[str, Any]
+
+
+def experiment_mazes(
+    spec: str,
+    overrides: list[str] | tuple[str, ...],
+    maze_seed: int | None,
+) -> ExperimentMazes:
+    """
+    A recipe without --maze-seed gives every run its own maze, built from the
+    run's maze seed (derive_run_seeds), so every controller sees the same maze
+    sequence. A recipe with --maze-seed, a layout or a saved maze is one fixed maze.
+    """
+    source = resolve_maze_source(spec, overrides)
+
+    if source.generated and maze_seed is None:
+        return ExperimentMazes(
+            factory=source.build,
+            label=source.name,
+            per_run=True,
+            info={
+                "maze_kind": source.kind,
+                "maze_per_run": True,
+                "maze_recipe": source.recipe().to_dict(),
+            },
+        )
+
+    seed = maze_seed if maze_seed is not None else 0
+    maze = source.build(seed)
+    info: dict[str, Any] = {"maze_kind": source.kind, "maze_per_run": False}
+
+    if source.generated:
+        info["maze_seed"] = seed
+        info["maze_recipe"] = source.recipe().to_dict()
+
+    return ExperimentMazes(
+        factory=lambda run_maze_seed: maze,
+        label=maze_label(source, maze, seed),
+        per_run=False,
+        info=info,
+    )
 
 
 # mazes list
@@ -85,7 +173,7 @@ def run_mazes_list(args: argparse.Namespace) -> None:
         try:
             if source.generated:
                 recipe = source.recipe()
-                size = f"{recipe.height}x{recipe.width}"
+                size = recipe.describe_size()
                 pellets = "-"
                 description = recipe.description
             else:
@@ -120,8 +208,8 @@ def describe(source: MazeSource, maze: Maze, seed: int) -> str:
 
 
 def run_mazes_show(args: argparse.Namespace) -> None:
-    source, maze = load_maze(args.spec, args)
-    print(describe(source, maze, args.maze_seed))
+    source, maze, seed = load_maze(args.spec, args)
+    print(describe(source, maze, seed))
     print(format_layout(maze), end="")
     print("metrics:")
     print_metrics(maze)
@@ -152,10 +240,10 @@ def rules_to_check(source: MazeSource, rules_spec: str | None) -> RuleSet:
 
 
 def run_mazes_check(args: argparse.Namespace) -> None:
-    source, maze = load_maze(args.spec, args)
+    source, maze, seed = load_maze(args.spec, args)
     rules = rules_to_check(source, args.rules)
 
-    print(describe(source, maze, args.maze_seed))
+    print(describe(source, maze, seed))
     print("metrics:")
     print_metrics(maze)
 
@@ -192,7 +280,7 @@ def run_mazes_preview(args: argparse.Namespace) -> None:
     # Imported here so the text commands work without opening a display.
     from pacman_otm.visualization.preview import run_maze_preview
 
-    source, maze = load_maze(args.spec, args)
+    source, maze, seed = load_maze(args.spec, args)
     violations = rules_to_check(source, args.rules).violations(maze.topography)
     highlights = {position for violation in violations for position in violation.positions}
 
@@ -201,7 +289,7 @@ def run_mazes_preview(args: argparse.Namespace) -> None:
         if violations
         else f"{maze.name}: all rules hold"
     )
-    print(describe(source, maze, args.maze_seed))
+    print(describe(source, maze, seed))
 
     for violation in violations:
         print_violation(violation, 10)
@@ -218,8 +306,8 @@ def run_mazes_generate(args: argparse.Namespace) -> None:
     if not source.generated:
         raise MazeSpecError(f"'{args.recipe}' is a {source.kind}; 'mazes generate' needs a recipe.")
 
-    registry = create_maze_registry()
-    seeds = range(args.seed, args.seed + args.count)
+    first = args.seed if args.seed is not None else random_maze_seed()
+    seeds = range(first, first + args.count)
 
     for seed in seeds:
         maze = source.build(seed)
@@ -236,31 +324,75 @@ def run_mazes_generate(args: argparse.Namespace) -> None:
             print(format_layout(maze))
 
         if args.save is not None:
-            name = args.save if args.count == 1 else f"{args.save}-{seed}"
-            save_generated(maze, name, registry, force=args.force)
+            target = args.save if args.count == 1 else _numbered(args.save, seed)
+            save_named_maze(maze, target, as_layout=args.layout, force=args.force)
 
 
-def save_generated(maze: Maze, name: str, registry, force: bool) -> None:
-    path = SAVED_DIR / f"{name}.json"
+NAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 
-    if name in registry.names():
-        existing = registry.source(name)
 
-        if existing.kind != "saved":
-            raise MazeSpecError(f"Cannot save as '{name}': that name is a {existing.kind} ({existing.path}).")
+def save_named_maze(maze: Maze, target: str, as_layout: bool, force: bool) -> Path:
+    """
+    Save a maze. `target` is either a name, which registers the maze
+    (mazes/saved/NAME.json, or mazes/layouts/NAME.txt with as_layout), or a
+    path ending in .json or .txt, which writes just that file.
 
-        if not force:
-            raise MazeSpecError(f"Saved maze '{name}' already exists ({path}); use --force to replace it.")
+    A .json keeps everything, including how the maze was made. A .txt layout
+    keeps tiles, pellets and start only, and can be edited by hand.
+    """
+    path = Path(target)
 
-    # Saved under its own name; the origin keeps the recipe (with its name) and the seed.
-    saved = Maze(
-        topography=maze.topography,
-        pacman_start=maze.pacman_start,
-        pellets=maze.initial_pellets,
-        origin=replace(maze.origin, name=name),
-    )
-    save_maze(saved, path)
-    print(f"Saved maze '{name}' to {path}")
+    if path.suffix in (".json", ".txt"):
+        as_layout = path.suffix == ".txt"
+        name = path.stem
+
+        if path.exists() and not force:
+            raise MazeSpecError(f"'{path}' already exists; use --force to replace it.")
+    else:
+        if not NAME_PATTERN.fullmatch(target):
+            raise MazeSpecError(
+                f"'{target}' is not a usable maze name: use letters, digits, '-', '_' and '.', "
+                f"or give a path ending in .json or .txt."
+            )
+
+        name = target
+        path = (LAYOUTS_DIR / f"{name}.txt") if as_layout else (SAVED_DIR / f"{name}.json")
+        kind = "layout" if as_layout else "saved"
+        registry = create_maze_registry()
+
+        if name in registry.names():
+            existing = registry.source(name)
+
+            if existing.kind != kind:
+                raise MazeSpecError(f"Cannot save as '{name}': that name is a {existing.kind} ({existing.path}).")
+
+            if not force:
+                raise MazeSpecError(f"Maze '{name}' already exists ({existing.path}); use --force to replace it.")
+
+    if as_layout:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(format_layout(maze), encoding="utf-8")
+    else:
+        # Saved under its own name; the origin keeps the recipe (with its name) and the seed.
+        origin = maze.origin if maze.origin is not None else MazeOrigin(source="layout", name=name)
+        save_maze(
+            Maze(
+                topography=maze.topography,
+                pacman_start=maze.pacman_start,
+                pellets=maze.initial_pellets,
+                origin=replace(origin, name=name),
+            ),
+            path,
+        )
+
+    print(f"Saved maze '{name}' to {path}" + (" (layout: edit pellets and 'P' by hand)" if as_layout else ""))
+    return path
+
+
+def run_mazes_save(args: argparse.Namespace) -> None:
+    source, maze, seed = load_maze(args.spec, args)
+    print(describe(source, maze, seed))
+    save_named_maze(maze, args.target, as_layout=args.layout, force=args.force)
 
 
 def add_mazes_parser(subparsers, add_scale_argument) -> None:
@@ -318,13 +450,23 @@ def add_mazes_parser(subparsers, add_scale_argument) -> None:
         ),
     )
     generate.add_argument("recipe", metavar="RECIPE")
-    generate.add_argument("--seed", type=non_negative_int, default=0, help="First maze seed. Default: 0.")
+    generate.add_argument(
+        "--seed",
+        type=non_negative_int,
+        default=None,
+        help="First maze seed. Default: random (every maze's seed is printed).",
+    )
     generate.add_argument("--count", type=positive_int, default=1, help="Number of seeds. Default: 1.")
     generate.add_argument(
         "--save",
         metavar="NAME",
         default=None,
-        help="Save as mazes/saved/NAME.json (NAME-SEED.json with --count > 1).",
+        help="Save each maze under NAME (NAME-SEED with --count > 1), or to a .json/.txt path. See 'mazes save'.",
+    )
+    generate.add_argument(
+        "--layout",
+        action="store_true",
+        help="Save as an editable .txt layout in mazes/layouts/ instead of a .json saved maze.",
     )
     generate.add_argument("--force", action="store_true", help="Replace a saved maze of the same name.")
     generate.add_argument("--quiet", action="store_true", help="Print the metric summary only.")
@@ -336,6 +478,33 @@ def add_mazes_parser(subparsers, add_scale_argument) -> None:
         help="Override a recipe value (see 'simulate --help'). Repeatable.",
     )
     generate.set_defaults(func=run_mazes_generate)
+
+    save = commands.add_parser(
+        "save",
+        help="Give any maze a name: save it as a .json saved maze or an editable .txt layout.",
+        description=(
+            "Build a maze (a recipe needs --maze-seed, or a random one is picked and printed) and save it. "
+            "TARGET is a name, which registers the maze (mazes/saved/NAME.json, or mazes/layouts/NAME.txt "
+            "with --layout), or a path ending in .json or .txt. A .json keeps how the maze was made; "
+            "a .txt layout can be edited by hand: move 'P', add or remove '.' pellets."
+        ),
+    )
+    save.add_argument("spec", metavar="SPEC")
+    save.add_argument("target", metavar="NAME|PATH")
+    save.add_argument("--layout", action="store_true", help="Save as a .txt layout in mazes/layouts/.")
+    save.add_argument("--force", action="store_true", help="Replace an existing maze of the same name or file.")
+    add_maze_options(save)
+    save.set_defaults(func=run_mazes_save)
+
+
+def _numbered(target: str, seed: int) -> str:
+    """NAME -> NAME-SEED; path/NAME.txt -> path/NAME-SEED.txt."""
+    path = Path(target)
+
+    if path.suffix in (".json", ".txt"):
+        return str(path.with_name(f"{path.stem}-{seed}{path.suffix}"))
+
+    return f"{target}-{seed}"
 
 
 def add_rules_argument(parser: argparse.ArgumentParser) -> None:

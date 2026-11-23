@@ -179,7 +179,7 @@ def test_overrides() -> None:
         ],
     )
 
-    assert (changed.height, changed.width) == (41, 45)
+    assert (changed.heights, changed.widths) == ((41, 41), (45, 45))
     assert changed.topography.extra_loops == 0.3 and changed.topography.spacing == (2, 3)
     assert changed.shape.name == "blob" and changed.shape.params["fill"] == 0.5
     assert changed.description == "tweaked"
@@ -315,3 +315,23 @@ def test_preview_draws_highlights() -> None:
     finally:
         renderer.close()
         pygame.quit()
+
+
+def test_a_recipe_without_a_seed_gets_a_random_announced_one(monkeypatch, capsys) -> None:
+    import argparse
+
+    from pacman_otm import maze_commands
+
+    monkeypatch.setattr(maze_commands, "random_maze_seed", lambda: 1234)
+    args = argparse.Namespace(maze_set=[], maze_seed=None)
+
+    source, maze, seed = maze_commands.load_maze("open-lattice", args)
+    assert seed == 1234 and maze.origin.seed == 1234
+    assert "--maze-seed 1234" in capsys.readouterr().out
+
+    # A given seed is used as is; layouts need none and print nothing.
+    args.maze_seed = 5
+    assert maze_commands.load_maze("open-lattice", args)[2] == 5
+    args.maze_seed = None
+    assert maze_commands.load_maze("small", args)[2] == 0
+    assert capsys.readouterr().out == ""

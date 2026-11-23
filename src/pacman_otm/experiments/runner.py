@@ -5,10 +5,12 @@ from statistics import mean, median, pstdev
 from collections.abc import Callable
 from typing import Any
 
+from pacman_otm.mazes.analysis import analyze
 from pacman_otm.mazes.maze import Maze
 from pacman_otm.controllers.controller import Controller
 from pacman_otm.experiments.seeding import RunSeeds, derive_run_seeds
 from pacman_otm.simulation.engine import SimulationEngine
+from pacman_otm.simulation.frame import SimulationFrame
 from pacman_otm.simulation.runner import run_simulation
 from pacman_otm.simulation.result import SimulationResult
 from pacman_otm.statistics_.serialization import pretty_json
@@ -21,6 +23,25 @@ MazeFactory = Callable[[int], Maze]
 # Called after each run with (run index, result), e.g. to print progress.
 RunCallback = Callable[[int, SimulationResult], None]
 
+# Called before each run with (run index, maze); returns that run's on_frame callback
+# (e.g. a live visualizer) or None. A run ended by "visualization_closed" stops the experiment.
+FrameCallback = Callable[[SimulationFrame], bool | None]
+RunStartCallback = Callable[[int, Maze], FrameCallback | None]
+
+# The termination reason run_simulation uses when on_frame asks to stop.
+VISUALIZATION_CLOSED = "visualization_closed"
+
+# Maze measurements copied into every run record (and results.csv), prefixed "maze_",
+# so controller performance can be read against what each maze is like.
+MAZE_METRIC_COLUMNS = (
+    "walkable_tiles",
+    "loops",
+    "dead_ends",
+    "junction_share",
+    "longest_straight_run",
+    "longest_corridor",
+)
+
 
 @dataclass
 class ExperimentResults:
@@ -28,6 +49,8 @@ class ExperimentResults:
     output_dir: Path
     runs: list[SimulationResult]
     seeds: list[RunSeeds]
+    # True when the visualization was closed: fewer runs than requested.
+    stopped_early: bool = False
 
 
 class ExperimentRunner:
@@ -48,6 +71,8 @@ class ExperimentRunner:
         seed: int = 42,
         max_steps: int = 1000,
         on_run: RunCallback | None = None,
+        maze_info: dict[str, Any] | None = None,
+        on_run_start: RunStartCallback | None = None,
     ) -> None:
 
         self.maze_factory = maze_factory
@@ -59,6 +84,9 @@ class ExperimentRunner:
         self.seed = seed
         self.max_steps = max_steps
         self.on_run = on_run
+        # Written once under "experiment" in results.json, e.g. the recipe of per-run mazes.
+        self.maze_info = dict(maze_info or {})
+        self.on_run_start = on_run_start
 
     def _create_output_dir(self) -> Path:
 
@@ -97,10 +125,15 @@ class ExperimentRunner:
             engine = SimulationEngine(maze)
             controller = self.controller_factory(maze, seeds.controller_seed)
 
+            on_frame = (
+                self.on_run_start(run_index, maze) if self.on_run_start is not None else None
+            )
+
             result = run_simulation(
                 engine=engine,
                 controller=controller,
                 max_steps=self.max_steps,
+                on_frame=on_frame,
             )
 
             run_dir = runs_dir / f"run_{run_index + 1:04d}"
@@ -113,11 +146,20 @@ class ExperimentRunner:
             if self.on_run is not None:
                 self.on_run(run_index, result)
 
+            # The interrupted run is kept (its termination reason says why it ended);
+            # the runs after it are not started.
+            if result.metrics.termination_reason == VISUALIZATION_CLOSED:
+                stopped_early = run_index + 1 < number_of_runs
+                break
+        else:
+            stopped_early = False
+
         experiment_results = ExperimentResults(
             name=self.experiment_name,
             output_dir=output_dir,
             runs=results,
             seeds=run_seeds,
+            stopped_early=stopped_early,
         )
 
         self._export_results(experiment_results)
@@ -141,6 +183,7 @@ class ExperimentRunner:
     ) -> dict[str, Any]:
 
         metrics = [result.metrics.to_dict() for result in results]
+        maze_metrics = [self._maze_metrics(result) for result in results]
 
         completed_runs = sum(1 for item in metrics if item["completed"])
 
@@ -164,7 +207,16 @@ class ExperimentRunner:
             "failed_or_incomplete_runs": len(results) - completed_runs,
             "run_completion_rate": completed_runs / len(results),
             "metrics": aggregates,
+            "maze_metrics": {
+                column: self._describe([float(item[column]) for item in maze_metrics])
+                for column in maze_metrics[0]
+            },
         }
+
+    @staticmethod
+    def _maze_metrics(result: SimulationResult) -> dict[str, Any]:
+        measured = analyze(result.maze).to_dict()
+        return {f"maze_{column}": measured[column] for column in MAZE_METRIC_COLUMNS}
 
     def _export_results(
         self,
@@ -175,14 +227,23 @@ class ExperimentRunner:
 
         for index, (result, seeds) in enumerate(zip(experiment.runs, experiment.seeds)):
 
-            # The full maze lives in each run's result.json; here only what identifies it.
+            origin = result.maze.origin
+
+            # The full maze lives in each run's result.json; here what identifies and describes it.
+            # maze_seed is the seed that built the maze: the run's own for per-run mazes,
+            # the fixed one for a fixed recipe maze.
             run_records.append(
                 {
                     "run": index + 1,
-                    "maze": result.maze.name if result.maze is not None else None,
-                    "maze_seed": seeds.maze_seed,
+                    "maze": result.maze.name,
+                    "maze_seed": (
+                        origin.seed
+                        if origin is not None and origin.seed is not None
+                        else seeds.maze_seed
+                    ),
                     "controller_seed": seeds.controller_seed,
                     **result.metrics.to_dict(),
+                    **self._maze_metrics(result),
                 }
             )
 
@@ -192,7 +253,9 @@ class ExperimentRunner:
                 "controller": self.controller_name,
                 "controller_type": (experiment.runs[0].controller or {}).get("type"),
                 "maze": self.maze_label,
+                **self.maze_info,
                 "number_of_runs": len(experiment.runs),
+                "stopped_early": experiment.stopped_early,
                 "seed": self.seed,
                 "max_steps": self.max_steps,
             },

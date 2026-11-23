@@ -11,7 +11,7 @@ from typing import Any, get_type_hints
 from pacman_otm.mazes.config import ConfigError, convert
 from pacman_otm.mazes.rules.base import Rule, RuleSet
 from pacman_otm.mazes.rules.hard import Connected, Enclosed, SizeBounds
-from pacman_otm.mazes.rules.local import MaxBlock, NoDiagonalContact
+from pacman_otm.mazes.rules.local import MaxBlock, MinWallThickness, NoDiagonalContact
 from pacman_otm.mazes.rules.structure import (
     MaxCorridorLength,
     MaxDeadEnds,
@@ -30,6 +30,7 @@ RULES: frozendict[str, type[Rule]] = frozendict(
             Connected,
             Enclosed,
             MaxBlock,
+            MinWallThickness,
             NoDiagonalContact,
             MaxDeadEnds,
             MaxStraightRun,

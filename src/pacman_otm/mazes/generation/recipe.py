@@ -17,7 +17,7 @@ from pacman_otm.mazes.config import ConfigError, check_keys, convert, keyword_pa
 from pacman_otm.mazes.generation.content import PELLET_PLACERS, START_PLACERS
 from pacman_otm.mazes.generation.errors import GenerationError
 from pacman_otm.mazes.generation.registry import GENERATORS, SHAPES
-from pacman_otm.mazes.grid import TILE_KINDS
+from pacman_otm.mazes.grid import MAX_MAZE_SIZE, MIN_MAZE_SIZE, TILE_KINDS
 from pacman_otm.mazes.origin import deep_freeze, deep_thaw
 from pacman_otm.mazes.rules.base import Rule, RuleSet
 from pacman_otm.mazes.rules.registry import rule_from_config
@@ -46,12 +46,17 @@ class Component:
         return {key: self.name, **deep_thaw(self.params)}
 
 
+# An inclusive (min, max) range; min == max for a fixed size.
+SizeRange = tuple[int, int]
+
+
 @dataclass(frozen=True)
 class MazeRecipe:
     name: str
     description: str
-    height: int
-    width: int
+    # Each maze's size is drawn from these ranges with the maze seed.
+    heights: SizeRange
+    widths: SizeRange
     shape: Component
     generator: str
     # The generator's parameter dataclass, e.g. LatticeParams.
@@ -64,6 +69,23 @@ class MazeRecipe:
     def rule_set(self) -> RuleSet:
         return RuleSet(self.rules)
 
+    @property
+    def fixed_size(self) -> tuple[int, int] | None:
+        """(height, width) when the size is not a range, else None."""
+
+        if self.heights[0] == self.heights[1] and self.widths[0] == self.widths[1]:
+            return self.heights[0], self.widths[0]
+
+        return None
+
+    def describe_size(self) -> str:
+        """'31x31', or '10..50x20..50' for ranges."""
+
+        def text(low: int, high: int) -> str:
+            return str(low) if low == high else f"{low}..{high}"
+
+        return f"{text(*self.heights)}x{text(*self.widths)}"
+
     def to_dict(self) -> dict[str, Any]:
         topography = {
             field.name: getattr(self.topography, field.name)
@@ -74,7 +96,7 @@ class MazeRecipe:
             {
                 "name": self.name,
                 "description": self.description,
-                "size": {"height": self.height, "width": self.width},
+                "size": {"height": _size_value(self.heights), "width": _size_value(self.widths)},
                 "shape": self.shape.to_dict("kind"),
                 "topography": {"generator": self.generator, **topography},
                 "rules": [rule.to_dict() for rule in self.rules],
@@ -113,8 +135,8 @@ def _recipe_from_dict(data: dict[str, Any], default_name: str) -> MazeRecipe:
         if key not in size:
             raise RecipeError(f"size.{key}: missing.")
 
-    height = convert(size["height"], int, "size.height")
-    width = convert(size["width"], int, "size.width")
+    heights = _size_range(size["height"], "size.height")
+    widths = _size_range(size["width"], "size.width")
 
     shape = _component(data.get("shape"), "shape", "kind", DEFAULT_SHAPE, SHAPES, skip=3)
 
@@ -150,8 +172,8 @@ def _recipe_from_dict(data: dict[str, Any], default_name: str) -> MazeRecipe:
     return MazeRecipe(
         name=name,
         description=description,
-        height=height,
-        width=width,
+        heights=heights,
+        widths=widths,
         shape=shape,
         generator=generator,
         topography=topography,
@@ -183,6 +205,7 @@ def apply_overrides(recipe: MazeRecipe, overrides: list[str] | tuple[str, ...]) 
     Apply KEY=VALUE overrides, in order, then validate the result. Examples:
 
         size=41x41                      size.height=41
+        size=11x21..51x51 (a range)     size.width=[21, 51]
         shape.kind=ellipse              topography.extra_loops=0.3
         content.pellets.placer=density  content.pellets.p=0.4
         rules.max_dead_ends.count=2     rules.max_block.wall.size=4
@@ -215,6 +238,28 @@ def apply_overrides(recipe: MazeRecipe, overrides: list[str] | tuple[str, ...]) 
 
 
 # Validation helpers
+
+
+def _size_range(value: Any, where: str) -> SizeRange:
+    """A fixed size (31) or an inclusive range ([10, 50]), within the maze bounds."""
+
+    if isinstance(value, list | tuple):
+        low, high = convert(value, tuple[int, int], where)
+    else:
+        low = high = convert(value, int, where)
+
+    for bound in (low, high):
+        if not MIN_MAZE_SIZE <= bound <= MAX_MAZE_SIZE:
+            raise RecipeError(f"{where}: sizes must be between {MIN_MAZE_SIZE} and {MAX_MAZE_SIZE}, got {bound}.")
+
+    if low > high:
+        raise RecipeError(f"{where}: the range [{low}, {high}] runs backwards; use [{high}, {low}].")
+
+    return low, high
+
+
+def _size_value(sizes: SizeRange) -> int | list[int]:
+    return sizes[0] if sizes[0] == sizes[1] else list(sizes)
 
 
 def _table(value: Any, where: str, required: bool = False) -> dict[str, Any]:
@@ -331,12 +376,26 @@ def _apply_size(data: dict[str, Any], rest: list[str], value: Any) -> None:
         data["size"] = {"height": value, "width": value}
         return
 
-    height, separator, width = str(value).lower().partition("x")
+    # HxW, or a range HxW..HxW
+    low, dots, high = str(value).lower().partition("..")
+    low_size = _parse_size(low, value)
+    high_size = _parse_size(high, value) if dots else low_size
+
+    data["size"] = {
+        "height": _size_value((low_size[0], high_size[0])),
+        "width": _size_value((low_size[1], high_size[1])),
+    }
+
+
+def _parse_size(text: str, value: Any) -> tuple[int, int]:
+    height, separator, width = text.strip().partition("x")
 
     if not separator or not height.isdigit() or not width.isdigit():
-        raise RecipeError(f"size: expected HxW such as 41x41, got {value!r}.")
+        raise RecipeError(
+            f"size: expected HxW such as 41x41, or a range such as 11x21..51x51, got {value!r}."
+        )
 
-    data["size"] = {"height": int(height), "width": int(width)}
+    return int(height), int(width)
 
 
 def _apply_table(table: dict[str, Any], rest: list[str], value: Any, selector: str, where: str) -> None:

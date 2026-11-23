@@ -1,5 +1,5 @@
 name = "classic-like"
-description = "Left-right symmetric, one-tile corridors, long halls, no dead ends (ghost house comes with step 10)."
+description = "Left-right symmetric, one-tile corridors, walls at least two thick, long halls, no dead ends."
 
 [size]
 height = 31
@@ -7,7 +7,7 @@ width = 28
 
 [topography]
 generator = "lattice"
-spacing = [2, 4]
+spacing = [3, 5]          # walls 2..4 thick, as in the arcade maze
 extra_loops = 0.15
 mirror = "horizontal"
 straightness = 0.5
@@ -28,6 +28,10 @@ size = 5
 
 [[rules]]
 rule = "no_diagonal_contact"
+
+[[rules]]
+rule = "min_wall_thickness"   # no one-tile walls between corridors (the border may be one tile)
+size = 2
 
 [[rules]]
 rule = "max_corridor_length"

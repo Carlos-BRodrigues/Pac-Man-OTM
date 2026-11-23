@@ -6,9 +6,11 @@ from pacman_otm.cli_types import non_negative_int, positive_int
 from pacman_otm.maze_commands import (
     add_maze_argument,
     add_mazes_parser,
+    experiment_mazes,
     load_maze,
     maze_label,
 )
+from pacman_otm.mazes.analysis import analyze
 from pacman_otm.mazes.config import ConfigError
 from pacman_otm.mazes.generation.errors import GenerationError
 from pacman_otm.mazes.registry import MazeSpecError
@@ -21,8 +23,9 @@ from pacman_otm.controllers.registry import create_controller_registry
 
 
 from pacman_otm.simulation.result import SimulationResult
-from pacman_otm.simulation.replay import ReplayPlayer
+from pacman_otm.simulation.replay import ResultSequence
 from pacman_otm.visualization.pygame_renderer import PygameRenderer
+from pacman_otm.visualization.experiment import ExperimentVisualizer
 from pacman_otm.visualization.live import LivePygameVisualizer
 from pacman_otm.visualization.replay import ReplayPygameVisualizer
 from pacman_otm.visualization.keyboard import PygameKeyboardInput
@@ -53,7 +56,8 @@ def save_result(
     args: argparse.Namespace,
     label: str,
 ) -> None:
-    if args.no_save:
+    # Not saved unless asked for: --save (auto-named) or --output NAME.
+    if not args.save and args.output is None:
         return
 
     path = resolve_output_path(args.output, label)
@@ -62,7 +66,7 @@ def save_result(
 
 
 def run_simulate(args: argparse.Namespace) -> None:
-    source, maze = load_maze(args.maze, args)
+    source, maze, maze_seed = load_maze(args.maze, args)
     engine = SimulationEngine(maze)
     controller = create_controller(args.controller, maze, args.seed)
 
@@ -93,11 +97,11 @@ def run_simulate(args: argparse.Namespace) -> None:
         for entry in result.history_summary():
             print(entry)
 
-    save_result(result, args, label=f"{args.controller}_{maze_label(source, maze, args.maze_seed)}")
+    save_result(result, args, label=f"{args.controller}_{maze_label(source, maze, maze_seed)}")
 
 
 def run_play(args: argparse.Namespace) -> None:
-    source, maze = load_maze(args.maze, args)
+    source, maze, maze_seed = load_maze(args.maze, args)
     engine = SimulationEngine(maze)
 
     renderer = PygameRenderer(maze, scale=args.scale)
@@ -123,34 +127,46 @@ def run_play(args: argparse.Namespace) -> None:
         visualizer.close()
 
     print(result.metrics)
-    save_result(result, args, label=f"manual_{maze_label(source, maze, args.maze_seed)}")
+    save_result(result, args, label=f"manual_{maze_label(source, maze, maze_seed)}")
 
 
 def run_experiment(args: argparse.Namespace) -> None:
-    # One fixed maze for every run (a recipe maze from --maze-seed); per-run mazes come in step 8.
-    source, maze = load_maze(args.maze, args)
-    label = maze_label(source, maze, args.maze_seed)
-    name = args.name or f"{args.controller}_{label}"
+    mazes = experiment_mazes(args.maze, args.maze_set, args.maze_seed)
+    name = args.name or f"{args.controller}_{mazes.label}"
 
     print(
-        f"Experiment '{name}': controller={args.controller}  maze={label}  "
-        f"runs={args.runs}  seed={args.seed}"
+        f"Experiment '{name}': controller={args.controller}  maze={mazes.label}"
+        f"{' (a new maze per run)' if mazes.per_run else ''}  runs={args.runs}  seed={args.seed}"
     )
 
     width = len(str(args.runs))
 
+    visualizer = (
+        ExperimentVisualizer(total_runs=args.runs, scale=args.scale, fps=args.fps)
+        if args.visualize
+        else None
+    )
+
     def report_run(run_index: int, result: SimulationResult) -> None:
         metrics = result.metrics
+        maze_text = ""
+
+        if mazes.per_run:
+            maze_metrics = analyze(result.maze)
+            maze_text = (
+                f"  maze seed={result.maze.origin.seed} walkable={maze_metrics.walkable_tiles} "
+                f"loops={maze_metrics.loops}"
+            )
+
         print(
             f"  run {run_index + 1:>{width}}/{args.runs}  "
             f"steps={metrics.total_steps:>5}  "
             f"collected={metrics.completion_rate:>7.1%}  "
-            f"{metrics.termination_reason}"
+            f"{metrics.termination_reason}{maze_text}"
         )
 
     experiment = ExperimentRunner(
-        # One fixed maze for now; the maze seed is recorded for generated mazes later.
-        maze_factory=lambda maze_seed: maze,
+        maze_factory=mazes.factory,
         controller_factory=lambda maze, seed: create_controller(
             args.controller,
             maze,
@@ -158,19 +174,32 @@ def run_experiment(args: argparse.Namespace) -> None:
         ),
         controller_name=args.controller,
         experiment_name=name,
-        maze_label=label,
+        maze_label=mazes.label,
+        maze_info=mazes.info,
         output_root=args.output_dir,
         seed=args.seed,
         max_steps=args.max_steps,
         on_run=report_run,
+        on_run_start=visualizer,
     )
 
-    results = experiment.run(args.runs)
+    try:
+        results = experiment.run(args.runs)
+
+        if visualizer is not None:
+            visualizer.wait_until_closed()
+    finally:
+        if visualizer is not None:
+            visualizer.close()
 
     completed = sum(1 for run in results.runs if run.metrics.completed)
     mean_steps = sum(run.metrics.total_steps for run in results.runs) / len(results.runs)
 
     print("=" * 40)
+
+    if results.stopped_early:
+        print(f"Stopped after {len(results.runs)} of {args.runs} runs: the window was closed.")
+
     print(f"Completed runs: {completed}/{len(results.runs)}")
     print(f"Mean steps: {mean_steps:.1f}")
     print(f"Output directory: {results.output_dir}")
@@ -182,17 +211,22 @@ def run_replay(args: argparse.Namespace) -> None:
     if not input_path.exists() and (RESULTS_DIR / input_path).exists():
         input_path = RESULTS_DIR / input_path
 
-    result = SimulationResult.load_json(input_path)
+    try:
+        runs = ResultSequence.from_path(input_path)
+    except ValueError as error:
+        raise MazeSpecError(str(error)) from error
 
-    if result.maze is None:
-        raise ValueError("The saved result does not contain a maze.")
+    if len(runs) > 1:
+        print(
+            f"Replaying {len(runs)} runs of '{runs.title}'. "
+            f"PageDown/] next run, PageUp/[ previous run, A toggles auto-advance."
+        )
 
-    replay = ReplayPlayer(result)
-    renderer = PygameRenderer(result.maze, scale=args.scale)
-    visualizer = ReplayPygameVisualizer(
-        renderer=renderer,
-        replay=replay,
+    visualizer = ReplayPygameVisualizer.for_runs(
+        runs,
         fps=args.fps,
+        scale=args.scale,
+        auto_advance=not args.no_auto_advance,
     )
 
     try:
@@ -249,12 +283,12 @@ def main() -> None:
         "--output",
         type=str,
         default=None,
-        help="Result file. A bare name is saved in results/. Default: auto-named in results/.",
+        help="Save the result to this file (implies --save). A bare name goes into results/.",
     )
     simulate_parser.add_argument(
-        "--no-save",
+        "--save",
         action="store_true",
-        help="Do not save the result.",
+        help="Save the result, auto-named in results/ (<controller>_<maze>_<timestamp>.json). Default: not saved.",
     )
     simulate_parser.add_argument(
         "--seed",
@@ -292,12 +326,12 @@ def main() -> None:
         "--output",
         type=str,
         default=None,
-        help="Result file. A bare name is saved in results/. Default: auto-named in results/.",
+        help="Save the result to this file (implies --save). A bare name goes into results/.",
     )
     play_parser.add_argument(
-        "--no-save",
+        "--save",
         action="store_true",
-        help="Do not save the result.",
+        help="Save the result, auto-named in results/ (manual_<maze>_<timestamp>.json). Default: not saved.",
     )
     add_scale_argument(play_parser)
     play_parser.set_defaults(func=run_play)
@@ -312,7 +346,14 @@ def main() -> None:
             "same --seed compares them on the same maze sequence."
         ),
     )
-    add_maze_argument(experiment_parser)
+    add_maze_argument(
+        experiment_parser,
+        seed_default=None,
+        seed_help=(
+            "Fix one recipe maze for every run. Without it, a recipe gives each run its own "
+            "maze, from the run's maze seed (the same sequence for every controller)."
+        ),
+    )
     experiment_parser.add_argument(
         "--runs",
         type=positive_int,
@@ -348,6 +389,18 @@ def main() -> None:
         choices=create_controller_registry().names(),
         default="nearest-pellet",
     )
+    experiment_parser.add_argument(
+        "--visualize",
+        action="store_true",
+        help="Watch every run live in one window (closing it stops the experiment).",
+    )
+    experiment_parser.add_argument(
+        "--fps",
+        type=positive_int,
+        default=30,
+        help="Steps per second while visualizing. Default: 30.",
+    )
+    add_scale_argument(experiment_parser)
     experiment_parser.set_defaults(func=run_experiment)
 
     # REPLAY
@@ -360,7 +413,7 @@ def main() -> None:
     replay_parser.add_argument(
         "input",
         type=str,
-        help="Saved simulation JSON file (also looked up in results/).",
+        help="A saved result .json, or an experiment folder to replay all its runs (both also looked up in results/).",
     )
 
     replay_parser.add_argument(
@@ -370,6 +423,11 @@ def main() -> None:
         help="Initial replay speed.",
     )
 
+    replay_parser.add_argument(
+        "--no-auto-advance",
+        action="store_true",
+        help="Experiment folders: stop at the end of each run instead of going on to the next (toggle with A).",
+    )
     add_scale_argument(replay_parser)
     replay_parser.set_defaults(func=run_replay)
 

@@ -5,7 +5,7 @@ from pacman_otm.mazes.layout import LEGEND
 from pacman_otm.mazes.registry import create_maze_registry
 from pacman_otm.mazes.rules.base import RuleSet
 from pacman_otm.mazes.rules.hard import HARD_RULES, Connected, Enclosed, SizeBounds
-from pacman_otm.mazes.rules.local import MaxBlock, NoDiagonalContact
+from pacman_otm.mazes.rules.local import MaxBlock, MinWallThickness, NoDiagonalContact
 from pacman_otm.mazes.rules.registry import (
     RULES,
     RuleConfigError,
@@ -297,6 +297,7 @@ def test_every_rule_round_trips_through_config() -> None:
         "min_loops": {"count": 3},
         "walkable_fraction": {"min": 0.3, "max": 0.6},
         "mirror_symmetric": {"axis": "both"},
+        "min_wall_thickness": {"size": 2},
     }
 
     for name in RULES:
@@ -330,3 +331,75 @@ def test_rules_from_toml(tmp_path) -> None:
     )
 
     assert list(rules_from_toml(path)) == [MaxDeadEnds(count=0), WalkableFraction(min=0.25)]
+
+
+def test_min_wall_thickness() -> None:
+    rule = MinWallThickness(size=2)
+
+    # The arcade maze: every wall between corridors is at least two thick; its border
+    # and ghost-house walls are one tile, which the rule allows.
+    assert not rule.violations(create_maze_registry().create("classic").topography)
+
+    thin = grid("""
+#######
+#     #
+# ### #
+#     #
+#######
+""")
+    assert failing_positions(rule, thin) == {(2, 2), (2, 3), (2, 4)}
+
+    thick = grid("""
+########
+#      #
+# #### #
+# #### #
+#      #
+########
+""")
+    assert not rule.violations(thick)
+    assert failing_positions(MinWallThickness(size=3), thick) == {
+        (row, col) for row in (2, 3) for col in range(2, 6)
+    }
+
+    # Next to void the border may be one tile thick.
+    padded = grid("""
+_______
+_#####_
+_#   #_
+_#   #_
+_#####_
+_______
+""")
+    assert not rule.violations(padded)
+
+    with pytest.raises(ValueError, match="size must be >= 2"):
+        MinWallThickness(size=1)
+
+
+@pytest.mark.parametrize("size", [2, 3])
+def test_min_wall_thickness_incremental_check_matches_full_check(size: int) -> None:
+    rule = MinWallThickness(size=size)
+    rng = np.random.default_rng(1)
+    step = size + 1
+    # Corridors every `step` rows and columns: walls exactly `size` thick.
+    tiles = np.full((3 * step + 2, 3 * step + 2), Tile.WALL, dtype=np.uint8)
+    tiles[1:-1:step, 1:-1] = Tile.CORRIDOR
+    tiles[1:-1, 1:-1:step] = Tile.CORRIDOR
+    assert not rule.violations(tiles)
+
+    outcomes = set()
+
+    for _ in range(1500):
+        position = (int(rng.integers(tiles.shape[0])), int(rng.integers(tiles.shape[1])))
+        previous = tiles[position]
+        tiles[position] = Tile.WALL if previous == Tile.CORRIDOR else Tile.CORRIDOR
+
+        holds = rule.holds_after_change(tiles, position)
+        assert holds == (not rule.violations(tiles))
+        outcomes.add(holds)
+
+        if not holds:
+            tiles[position] = previous
+
+    assert outcomes == {True, False}

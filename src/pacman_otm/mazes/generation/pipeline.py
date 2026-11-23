@@ -1,5 +1,5 @@
 """
-build_maze(recipe, seed): shape -> topography -> final rule check -> content -> Maze.
+build_maze(recipe, seed): size -> shape -> topography -> final rule check -> content -> Maze.
 
 The seed is split into independent streams (numpy SeedSequence), so changing
 one part of a recipe never changes what the others make: another pellet placer
@@ -27,18 +27,32 @@ class SeedStreams:
         if seed < 0:
             raise GenerationError(f"The maze seed must be non-negative, got {seed}.")
 
-        shape, topography, start, pellets = np.random.SeedSequence(seed).spawn(4)
+        # New streams go at the end: SeedSequence children keep their values when
+        # more are spawned, so existing recipes and seeds keep making the same mazes.
+        shape, topography, start, pellets, size = np.random.SeedSequence(seed).spawn(5)
         self.shape = np.random.default_rng(shape)
         self.topography = np.random.default_rng(topography)
         self.start = np.random.default_rng(start)
         self.pellets = np.random.default_rng(pellets)
+        self.size = np.random.default_rng(size)
+
+
+def pick_size(recipe: MazeRecipe, streams: SeedStreams) -> tuple[int, int]:
+    """Height and width, each drawn uniformly from the recipe's range."""
+
+    (low_height, high_height), (low_width, high_width) = recipe.heights, recipe.widths
+    height = int(streams.size.integers(low_height, high_height + 1))
+    width = int(streams.size.integers(low_width, high_width + 1))
+    return height, width
 
 
 def build_region(recipe: MazeRecipe, streams: SeedStreams) -> np.ndarray:
+    height, width = pick_size(recipe, streams)
+
     return region_mask(
         recipe.shape.name,
-        recipe.height,
-        recipe.width,
+        height,
+        width,
         streams.shape,
         **_resolve_paths(recipe.shape.params),
     )

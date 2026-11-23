@@ -67,6 +67,9 @@ class PygameRenderer:
         self.show_target = show_target
         self.show_planned_path = show_planned_path
 
+        # Optional text in the middle of the HUD, e.g. "RUN 3/20" in an experiment replay.
+        self.hud_label: str | None = None
+
         self.is_open = True
 
     def _fit_scale(self) -> int:
@@ -256,6 +259,10 @@ class PygameRenderer:
             self.theme.text,
         )
         self.screen.blit(step_text, step_text.get_rect(midleft=(self.scale * 2, self.hud_px // 2)))
+
+        if self.hud_label:
+            label_text = self.font.render(self.hud_label, True, self.theme.text)
+            self.screen.blit(label_text, label_text.get_rect(center=(self.width // 2, self.hud_px // 2)))
 
         overlay_text = self.font.render(
             f"T:{'on' if self.show_target else 'off'}  "
