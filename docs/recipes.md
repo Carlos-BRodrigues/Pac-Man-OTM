@@ -322,7 +322,7 @@ python -m pacman_otm simulate --maze open-lattice --maze-set size=51x51 --maze-s
 |---|---|---|
 | `open-lattice` | Generic loopy maze, no dead ends. | 31×31, `extra_loops = 0.15`, no dead ends, one-tile corridors, walls < 5. |
 | `classic-like` | Arcade feel. | 31×28, `mirror = "horizontal"`, `spacing = [3, 5]`, `min_wall_thickness = 2`, `straightness = 0.5`, `max_corridor_length = 14`. |
-| `blob-lattice` | Organic outline. | 41×41 blob, `node_dropout = 0.15`. |
+| `blob-lattice` | Organic outline, varying size. | 50..70 blob (`fill = 0.8`), `spacing = [3, 6]`, `node_dropout = 0.1`, walls 2..6 thick, runs ≤ 15, corridors ≤ 20. |
 | `twisty` | Winding and tree-like. | `straightness = -0.8`, `extra_loops = 0.03`, up to 6 dead ends, random start. |
 | `wide-halls` | Two-tile corridors. | `corridor_width = 2`, `spacing = [3, 5]`. |
 
