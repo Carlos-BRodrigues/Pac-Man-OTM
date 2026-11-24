@@ -98,6 +98,10 @@ class PygameRenderer:
 
         self._draw_scene(frame, previous_frame, progress)
 
+        ghost_pos = self._ghost_position(frame, previous_frame, progress)
+        if ghost_pos is not None:
+            self._draw_ghost(ghost_pos, frame.state.ghost_direction)
+
         position = self._player_position(frame, previous_frame, progress)
         self._blit_sprite(self.sprites.player(pose.mouth, pose.facing), position)
 
@@ -110,6 +114,12 @@ class PygameRenderer:
         message: str | None = None,
     ) -> None:
         self._draw_scene(frame, None, 1.0)
+
+        if frame.state.ghost_position is not None:
+            self._draw_ghost(
+                self._tile_pixel(frame.state.ghost_position),
+                frame.state.ghost_direction,
+            )
 
         position = self._tile_pixel(frame.state.pacman_position)
         self._blit_sprite(self.sprites.death[death_index], position)
@@ -172,6 +182,72 @@ class PygameRenderer:
         row = previous[0] + (current[0] - previous[0]) * progress
         col = previous[1] + (current[1] - previous[1]) * progress
         return self._tile_pixel((row, col))
+
+    def _ghost_position(
+        self,
+        frame: SimulationFrame,
+        previous_frame: SimulationFrame | None,
+        progress: float,
+    ) -> tuple[float, float] | None:
+        current = frame.state.ghost_position
+        if current is None:
+            return None
+
+        if previous_frame is None or progress >= 1.0:
+            return self._tile_pixel(current)
+
+        previous = previous_frame.state.ghost_position
+        if previous is None or move_direction(previous, current) is None:
+            return self._tile_pixel(current)
+
+        row = previous[0] + (current[0] - previous[0]) * progress
+        col = previous[1] + (current[1] - previous[1]) * progress
+        return self._tile_pixel((row, col))
+
+    def _draw_ghost(
+        self,
+        tile_pixel: tuple[float, float],
+        direction: tuple[int, int],
+    ) -> None:
+        """Draw Blinky on the 8x8 base pixel grid."""
+        x = round(tile_pixel[0])
+        y = round(tile_pixel[1])
+        s = self.scale
+
+        body_color = (255, 0, 0)
+        eye_white = (255, 255, 255)
+        eye_pupil = (33, 33, 255)
+
+        # Rounded top + torso + wavy skirt on an 8x8 pixel grid
+        pygame.draw.rect(self.screen, body_color, pygame.Rect(x + 2 * s, y + s, 4 * s, s))
+        pygame.draw.rect(self.screen, body_color, pygame.Rect(x + s, y + 2 * s, 6 * s, 4 * s))
+        pygame.draw.rect(self.screen, body_color, pygame.Rect(x + s, y + 6 * s, s, s))
+        pygame.draw.rect(self.screen, body_color, pygame.Rect(x + 3 * s, y + 6 * s, 2 * s, s))
+        pygame.draw.rect(self.screen, body_color, pygame.Rect(x + 6 * s, y + 6 * s, s, s))
+
+        # Eyes + pupils shifted toward movement direction
+        d_row, d_col = direction
+        eye_shift_x = s if d_col > 0 else 0
+        pupil_dx = 1 if d_col > 0 else 0
+        pupil_dy = 1 if d_row > 0 else 0
+
+        left_eye_x = x + s + eye_shift_x
+        right_eye_x = x + 4 * s + eye_shift_x
+        eye_y = y + 3 * s
+
+        pygame.draw.rect(self.screen, eye_white, pygame.Rect(left_eye_x, eye_y, 2 * s, 2 * s))
+        pygame.draw.rect(self.screen, eye_white, pygame.Rect(right_eye_x, eye_y, 2 * s, 2 * s))
+
+        pygame.draw.rect(
+            self.screen,
+            eye_pupil,
+            pygame.Rect(left_eye_x + pupil_dx * s, eye_y + pupil_dy * s, s, s),
+        )
+        pygame.draw.rect(
+            self.screen,
+            eye_pupil,
+            pygame.Rect(right_eye_x + pupil_dx * s, eye_y + pupil_dy * s, s, s),
+        )
 
     def _blit_sprite(self, sprite: pygame.Surface, tile_pixel: tuple[float, float]) -> None:
         offset = self.theme.sprite_offset * self.scale

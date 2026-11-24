@@ -1,6 +1,32 @@
-from pacman_otm.mazes.maze import Maze
+from pacman_otm.mazes.maze import Maze, Position
 from pacman_otm.simulation.actions import Action
 from pacman_otm.simulation.state import SimulationState
+
+
+def ghost_step(
+    maze: Maze,
+    ghost_pos: Position,
+    ghost_dir: tuple[int, int],
+    target_pos: Position,
+) -> tuple[Position, tuple[int, int]]:
+    """Deterministic greedy pursuit f(g_t, d_t, v_t) used by Blinky."""
+    valid_moves = list(maze.get_valid_movements(ghost_pos).values())
+    if not valid_moves:
+        return ghost_pos, (0, 0)
+
+    reverse_pos = (ghost_pos[0] - ghost_dir[0], ghost_pos[1] - ghost_dir[1])
+    if len(valid_moves) > 1:
+        candidates = [w for w in valid_moves if w != reverse_pos]
+    else:
+        candidates = valid_moves
+
+    # Maze.MOVEMENTS is ordered UP, LEFT, DOWN, RIGHT, preserving tie-break order.
+    best_pos = min(
+        candidates,
+        key=lambda w: (w[0] - target_pos[0]) ** 2 + (w[1] - target_pos[1]) ** 2,
+    )
+    new_dir = (best_pos[0] - ghost_pos[0], best_pos[1] - ghost_pos[1])
+    return best_pos, new_dir
 
 
 class SimulationEngine:
@@ -25,16 +51,41 @@ class SimulationEngine:
         if self.state.terminated:
             raise RuntimeError("Simulation has already terminated.")
 
-        destination = self.maze.get_destination(
-            self.state.pacman_position,
-            action,
-        )
+        prev_pacman = self.state.pacman_position
+        destination = self.maze.get_destination(prev_pacman, action)
 
         if self.maze.is_walkable(destination):
             self.state.pacman_position = destination
 
+        # Simultaneous ghost transition using v_t (prev_pacman) and phase phi_t = t mod m
+        prev_ghost = self.state.ghost_position
+        if prev_ghost is not None:
+            if self.state.steps % self.state.ghost_period == 0:
+                next_ghost, next_dir = ghost_step(
+                    self.maze,
+                    prev_ghost,
+                    self.state.ghost_direction,
+                    prev_pacman,
+                )
+                self.state.ghost_position = next_ghost
+                self.state.ghost_direction = next_dir
+
         # Every attempted action consumes one step
         self.state.steps += 1
+
+        # Check cell collision (v_{t+1} == g_{t+1}) and edge crossing
+        if prev_ghost is not None and self.state.ghost_position is not None:
+            same_cell = self.state.pacman_position == self.state.ghost_position
+            edge_swap = (
+                self.state.pacman_position == prev_ghost
+                and prev_pacman == self.state.ghost_position
+            )
+            if same_cell or edge_swap:
+                self.state.terminated = True
+                self.state.termination_reason = "caught_by_ghost"
+                self.actions.append(action)
+                self.states.append(self.state.copy())
+                return self.state
 
         # Collect pellet at the resulting position
         self.state.collect_pellet()

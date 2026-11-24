@@ -12,13 +12,13 @@ Position = tuple[int, int]
 
 class Maze:
     """
-    The static map: tiles, Pac-Man's start and the initial pellets.
+    The static map: tiles, Pac-Man's start, optional ghost start and initial pellets.
 
     Immutable after construction (read-only array, frozenset of pellets), so
     one Maze can be shared by many runs and by every state that refers to it.
     """
 
-    # Order matters: it is the tie-break for BFS and the draw order for
+    # Order matters: it is the tie-break for BFS/ghosts and the draw order for
     # random controllers. UP, LEFT, DOWN, RIGHT.
     MOVEMENTS = frozendict(
         {
@@ -35,12 +35,20 @@ class Maze:
         pacman_start: Position,
         pellets: Iterable[Position],
         origin: MazeOrigin | None = None,
+        ghost_start: Position | None = None,
+        ghost_period: int = 1,
     ) -> None:
+        if ghost_period < 1:
+            raise ValueError("ghost_period must be >= 1.")
 
         self.topography = self._build_topography(topography)
         self.topography.flags.writeable = False
 
         self.pacman_start: Position = tuple(pacman_start)
+        self.ghost_start: Position | None = (
+            tuple(ghost_start) if ghost_start is not None else None
+        )
+        self.ghost_period: int = ghost_period
         self.initial_pellets: frozenset[Position] = frozenset(
             tuple(position) for position in pellets
         )
@@ -149,6 +157,11 @@ class Maze:
         if not self.is_walkable(self.pacman_start):
             raise ValueError(
                 f"Pac-Man start {self.pacman_start} must be on a walkable tile."
+            )
+
+        if self.ghost_start is not None and not self.is_walkable(self.ghost_start):
+            raise ValueError(
+                f"Ghost start {self.ghost_start} must be on a walkable tile."
             )
 
         misplaced = sorted(

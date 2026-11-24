@@ -1,4 +1,3 @@
-
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -69,14 +68,18 @@ class SimulationResult:
                 else None
             )
 
-            history.append({
+            entry: dict[str, Any] = {
                 "step": state.steps,
                 "pacman_position": state.pacman_position,
                 "remaining_pellets": len(state.remaining_pellets),
                 "next_action": (
                     next_action.value if next_action is not None else None
                 ),
-            })
+            }
+            if state.ghost_position is not None:
+                entry["ghost_position"] = state.ghost_position
+
+            history.append(entry)
 
         return history
 
@@ -130,6 +133,12 @@ class SimulationResult:
         for state_data in data["states"]:
             state = SimulationState(maze)
             state.pacman_position = tuple(state_data["pacman_position"])
+            if state_data.get("ghost_position") is not None:
+                state.ghost_position = tuple(state_data["ghost_position"])
+            if state_data.get("ghost_direction") is not None:
+                state.ghost_direction = tuple(state_data["ghost_direction"])
+            if state_data.get("ghost_period") is not None:
+                state.ghost_period = state_data["ghost_period"]
             state.remaining_pellets = {
                 tuple(position)
                 for position in state_data["remaining_pellets"]

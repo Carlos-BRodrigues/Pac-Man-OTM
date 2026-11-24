@@ -5,6 +5,7 @@ Text layouts: one character per tile, one line per row.
     .  corridor with pellet H  ghost house (decorative)
     o  corridor with pellet -  ghost gate (decorative)
        (space) corridor     P  Pac-Man start (corridor, no pellet)
+                            G  Ghost (Blinky) start (corridor, no pellet)
 
 `o` is a normal pellet: there are no power pellets.
 """
@@ -25,6 +26,7 @@ LEGEND: frozendict[str, tuple[Tile, bool]] = frozendict(
         "o": (Tile.CORRIDOR, True),
         " ": (Tile.CORRIDOR, False),
         "P": (Tile.CORRIDOR, False),
+        "G": (Tile.CORRIDOR, False),
         "_": (Tile.VOID, False),
         "H": (Tile.GHOST_HOUSE, False),
         "-": (Tile.GHOST_GATE, False),
@@ -32,6 +34,7 @@ LEGEND: frozendict[str, tuple[Tile, bool]] = frozendict(
 )
 
 START = "P"
+GHOST_START = "G"
 
 # tile -> character for format_layout; pellets and the start are handled separately
 _TILE_CHARACTERS: frozendict[Tile, str] = frozendict(
@@ -69,6 +72,7 @@ def parse_layout(text: str, name: str) -> Maze:
     topography: list[list[int]] = []
     pellets: set[Position] = set()
     starts: list[Position] = []
+    ghost_starts: list[Position] = []
 
     for row, line in enumerate(lines):
         topography_row = []
@@ -88,6 +92,8 @@ def parse_layout(text: str, name: str) -> Maze:
 
             if character == START:
                 starts.append((row, col))
+            elif character == GHOST_START:
+                ghost_starts.append((row, col))
 
         topography.append(topography_row)
 
@@ -97,11 +103,18 @@ def parse_layout(text: str, name: str) -> Maze:
             f"Layout '{name}' needs exactly one '{START}' (Pac-Man start); found {found}."
         )
 
+    if len(ghost_starts) > 1:
+        found = ", ".join(str(g) for g in ghost_starts)
+        raise ValueError(
+            f"Layout '{name}' can have at most one '{GHOST_START}' (ghost start); found {found}."
+        )
+
     return Maze(
         topography=topography,
         pacman_start=starts[0],
         pellets=pellets,
         origin=MazeOrigin(source="layout", name=name),
+        ghost_start=ghost_starts[0] if ghost_starts else None,
     )
 
 
@@ -124,6 +137,8 @@ def format_layout(maze: Maze) -> str:
 
             if position == maze.pacman_start:
                 characters.append(START)
+            elif maze.ghost_start is not None and position == maze.ghost_start:
+                characters.append(GHOST_START)
             elif position in maze.initial_pellets:
                 characters.append(".")
             else:
