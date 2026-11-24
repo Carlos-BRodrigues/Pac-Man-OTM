@@ -34,6 +34,8 @@ def test_small_metrics_match_a_hand_count() -> None:
         "symmetric_horizontal": False,
         "symmetric_vertical": False,
         "pellets": 14,
+        "ghost_spawns": 0,
+        "nearest_ghost_spawn": None,
     }
 
 

@@ -8,8 +8,10 @@ from typing import Any
 from pacman_otm.mazes.analysis import analyze
 from pacman_otm.mazes.maze import Maze
 from pacman_otm.controllers.controller import Controller
+from pacman_otm.controllers.ghosts.registry import create_ghosts, ghost_lineup
 from pacman_otm.experiments.seeding import RunSeeds, derive_run_seeds
 from pacman_otm.simulation.engine import SimulationEngine
+from pacman_otm.simulation.ghosts import CAUGHT_REASON
 from pacman_otm.simulation.frame import SimulationFrame
 from pacman_otm.simulation.runner import DEFAULT_MAX_STEPS, run_simulation
 from pacman_otm.simulation.result import SimulationResult
@@ -58,7 +60,9 @@ class ExperimentRunner:
     """
     Runs one controller over a sequence of mazes. Run i uses the seeds
     derive_run_seeds(seed, i), so the maze sequence depends only on the
-    experiment seed and is identical for every controller.
+    experiment seed and is identical for every controller. Each maze brings its
+    ghosts: one Blinky per ghost spawn (ghosts are deterministic, so every
+    controller meets the same ghosts on the same maze).
     """
 
     def __init__(
@@ -123,7 +127,8 @@ class ExperimentRunner:
             run_seeds.append(seeds)
 
             maze = self.maze_factory(run_index, seeds.maze_seed)
-            engine = SimulationEngine(maze)
+            ghost_kinds = ghost_lineup(maze)
+            engine = SimulationEngine(maze, ghost_kinds)
             controller = self.controller_factory(maze, seeds.controller_seed)
 
             on_frame = (
@@ -135,6 +140,7 @@ class ExperimentRunner:
                 controller=controller,
                 max_steps=self.max_steps,
                 on_frame=on_frame,
+                ghosts=create_ghosts(maze, ghost_kinds),
             )
 
             run_dir = runs_dir / f"run_{run_index + 1:04d}"
@@ -206,6 +212,7 @@ class ExperimentRunner:
             "number_of_runs": len(results),
             "completed_runs": completed_runs,
             "failed_or_incomplete_runs": len(results) - completed_runs,
+            "caught_runs": sum(1 for item in metrics if item["termination_reason"] == CAUGHT_REASON),
             "run_completion_rate": completed_runs / len(results),
             "metrics": aggregates,
             "maze_metrics": {

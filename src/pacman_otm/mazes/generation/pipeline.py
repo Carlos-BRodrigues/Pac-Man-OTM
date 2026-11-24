@@ -3,14 +3,21 @@ build_maze(recipe, seed): size -> shape -> topography -> final rule check -> con
 
 The seed is split into independent streams (numpy SeedSequence), so changing
 one part of a recipe never changes what the others make: another pellet placer
-keeps the topography and the start, other rules keep the shape.
+keeps the topography and the start, other rules keep the shape, and the number
+of ghosts changes only the ghost spawns.
 """
 
+from dataclasses import replace
 from typing import Any
 
 import numpy as np
 
-from pacman_otm.mazes.generation.content import PELLET_PLACERS, START_PLACERS
+from pacman_otm.mazes.generation.content import (
+    GHOST_PLACERS,
+    PELLET_PLACERS,
+    START_PLACERS,
+    place_ghost_spawns,
+)
 from pacman_otm.mazes.generation.errors import GenerationError
 from pacman_otm.mazes.generation.recipe import MazeRecipe
 from pacman_otm.mazes.generation.registry import GENERATORS
@@ -29,12 +36,13 @@ class SeedStreams:
 
         # New streams go at the end: SeedSequence children keep their values when
         # more are spawned, so existing recipes and seeds keep making the same mazes.
-        shape, topography, start, pellets, size = np.random.SeedSequence(seed).spawn(5)
+        shape, topography, start, pellets, size, ghosts = np.random.SeedSequence(seed).spawn(6)
         self.shape = np.random.default_rng(shape)
         self.topography = np.random.default_rng(topography)
         self.start = np.random.default_rng(start)
         self.pellets = np.random.default_rng(pellets)
         self.size = np.random.default_rng(size)
+        self.ghosts = np.random.default_rng(ghosts)
 
 
 def pick_size(recipe: MazeRecipe, streams: SeedStreams) -> tuple[int, int]:
@@ -78,11 +86,13 @@ def build_maze(recipe: MazeRecipe, seed: int) -> Maze:
         streams.pellets,
         **_resolve_paths(recipe.pellets.params),
     )
+    ghost_spawns = GHOST_PLACERS[recipe.ghosts.name](grid, start, streams.ghosts, **recipe.ghosts.params)
 
     return Maze(
         topography=grid,
         pacman_start=start,
         pellets=pellets,
+        ghost_spawns=ghost_spawns,
         origin=MazeOrigin(
             source="generated",
             name=recipe.name,
@@ -91,6 +101,36 @@ def build_maze(recipe: MazeRecipe, seed: int) -> Maze:
             seed=seed,
             package_version=package_version(),
         ),
+    )
+
+
+def with_ghost_count(maze: Maze, count: int, seed: int) -> Maze:
+    """
+    The same maze with `count` ghost spawns: its own spawns first (a layout's G
+    tiles, in order), then seeded random ones from the seed's ghost stream. The
+    tiles, start and pellets are unchanged. The origin records count and seed.
+    """
+    if count == len(maze.ghost_spawns):
+        return maze
+
+    spawns = place_ghost_spawns(
+        maze.topography,
+        maze.pacman_start,
+        SeedStreams(seed).ghosts,
+        count=count,
+        fixed=maze.ghost_spawns,
+    )
+    origin = maze.origin
+
+    if origin is not None:
+        origin = replace(origin, params={**origin.params, "ghosts": {"count": count, "seed": seed}})
+
+    return Maze(
+        topography=maze.topography,
+        pacman_start=maze.pacman_start,
+        pellets=maze.initial_pellets,
+        origin=origin,
+        ghost_spawns=spawns,
     )
 
 

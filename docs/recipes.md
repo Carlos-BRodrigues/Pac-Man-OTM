@@ -7,7 +7,7 @@ A **recipe** is a small TOML file that describes how to make a maze. It doesn't 
 Given a seed, the recipe always produces the same maze, so any maze can be rebuilt from its
 recipe and seed.
 
-A recipe has six parts, each covered below:
+A recipe has seven parts, each covered below:
 
 | Part | Says |
 |---|---|
@@ -17,6 +17,7 @@ A recipe has six parts, each covered below:
 | [`[[rules]]`](#rules) | Requirements the corridors must meet (no dead ends, no thick walls…). |
 | [`[content.pellets]`](#contentpellets) | Where the pellets go. |
 | [`[content.start]`](#contentstart) | Where Pac-Man starts. |
+| [`[content.ghosts]`](#contentghosts) | How many ghosts there are and where they spawn. |
 
 All you need to begin is a `[size]`; every other part has a default.
 
@@ -79,9 +80,10 @@ A recipe can also live anywhere else and be passed as a path: `--maze path/to/my
 - **`mazes generate`**: `--seed N` is the first seed and `--count K` makes seeds N to N+K−1.
   Without `--seed` the first seed is random. Every seed is printed.
 
-A maze seed is split into five independent streams: the size (when it is a range), the shape, the corridors, the
-start and the pellets. Changing one part of a recipe therefore leaves the others alone. For example, a different
-pellet placer gives the same corridors and the same start.
+A maze seed is split into six independent streams: the size (when it is a range), the shape, the corridors, the
+start, the pellets and the ghost spawns. Changing one part of a recipe therefore leaves the others alone. For
+example, a different pellet placer gives the same corridors and the same start, and a different number of ghosts
+(`--ghosts N`) gives the same maze with other spawns.
 
 **Keeping a maze.** If a generated maze is worth keeping, give it a name:
 
@@ -125,6 +127,11 @@ placer = "all_corridors"    # all_corridors | density | exclude_near_start
 
 [content.start]
 placer = "center"           # center | random | layout
+
+[content.ghosts]
+placer = "random"
+count = 0                   # ghost spawns (one Blinky each); --ghosts N overrides
+min_distance = 10           # BFS steps from the start
 ```
 
 ---
@@ -373,6 +380,18 @@ The start tile never has a pellet. There are no power pellets.
 | `random` | none | A random corridor tile. |
 | `layout` | `path` (default: the shape's `path`) | The corridor tile closest to the `P` of a layout file. |
 
+## `[content.ghosts]`
+
+| `placer` | Extra keys | Meaning |
+|---|---|---|
+| `random` | `count` (default 0), `min_distance` (default 10) | `count` distinct corridor tiles at least `min_distance` steps (BFS) from the start. |
+
+Each spawn gets one ghost (Blinky, the red ghost that chases Pac-Man), and ghost *i* starts on spawn *i*. A spawn
+is an ordinary corridor tile: it may hold a pellet, and it is marked with a dim ghost sticker. Spawns come from
+their own seed stream, so the count never changes the corridors, the start or the pellets, and a larger count only
+adds spawns (the first ones stay put). Every starter recipe has `count = 1`; without this table a recipe has no
+ghosts. `--ghosts N` on any command replaces the count, and `--ghosts 0` plays without ghosts.
+
 ---
 
 ## Changing a recipe from the command line: `--maze-set`
@@ -390,7 +409,7 @@ repeated, and the overrides are applied in order.
 | `rules.<rule>.<param>` | `rules.max_dead_ends.count=2` | Changes the rule, or adds it if the recipe doesn't have it. |
 | `rules.max_block.<tile>.<param>` | `rules.max_block.wall.size=4` | `max_block` is picked by its tile. |
 | `rules.<rule>=off` | `rules.max_dead_ends=off`, `rules.max_block.wall=off` | Removes the rule. |
-| `content.pellets.<key>`, `content.start.<key>` | `content.pellets.placer=density` | Setting `placer` clears the other keys. |
+| `content.pellets.<key>`, `content.start.<key>`, `content.ghosts.<key>` | `content.pellets.placer=density`, `content.ghosts.min_distance=15` | Setting `placer` clears the other keys. |
 
 Values are read as TOML (`3`, `0.25`, `true`, `[2, 4]`, `"text"`), and anything else as plain text.
 Example:

@@ -238,3 +238,95 @@ def test_default_window_size_is_predictable(monkeypatch) -> None:
     renderer = PygameRenderer(resolve_maze("small"), scale=2)
     assert renderer.screen is renderer.window and renderer.window.get_width() == max(200, 7 * THEME.tile * 2)
     renderer.close()
+
+
+# Ghosts
+
+def _ghost_run(maze_name: str = "classic", ghosts: int = 2, controller: str = "random-walk"):
+    from pacman_otm.controllers.ghosts.registry import create_ghosts, ghost_lineup
+
+    maze = resolve_maze(maze_name, ghost_count=ghosts, maze_seed=1)
+    kinds = ghost_lineup(maze)
+    return run_simulation(
+        engine=SimulationEngine(maze, kinds),
+        controller=create_controller_registry().create(controller, maze, 2),
+        ghosts=create_ghosts(maze, kinds),
+        max_steps=300,
+    )
+
+
+def test_ghost_sprites_alternate_and_look_where_they_go() -> None:
+    from pacman_otm.visualization.animation import ghost_frame_at
+    from pacman_otm.visualization.sprites import GHOST_FRAMES, ghost_body_mask, ghost_eye_masks
+
+    assert GHOST_FRAMES == 2
+    assert not np.array_equal(ghost_body_mask(0), ghost_body_mask(1))
+    assert {ghost_frame_at(ms) for ms in range(0, 1000, 40)} == {0, 1}
+
+    pupils = {facing: ghost_eye_masks(facing)[1] for facing in (*Action, None)}
+    assert len({mask.tobytes() for mask in pupils.values()}) == 5
+
+    # Pupils lie inside the eyes, and the eyes inside the body.
+    for facing, mask in pupils.items():
+        whites, _ = ghost_eye_masks(facing)
+        assert not (whites & mask).any()
+        assert not ((whites | mask) & ~ghost_body_mask(0)).any()
+
+    sprites = SpriteSet(THEME, scale=2)
+    assert sprites.ghost("blinky", 0, Action.LEFT).get_size() == (THEME.sprite * 2,) * 2
+    assert sprites.sticker("blinky").get_size() == (THEME.sticker * 2,) * 2
+
+
+def test_renderer_draws_ghosts_overlays_and_toggles() -> None:
+    result = _ghost_run()
+    renderer = PygameRenderer(result.maze, scale=2)
+    replay = ReplayPlayer(result)
+
+    assert renderer.show_ghost_overlays
+    renderer.handle_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_g))
+    assert not renderer.show_ghost_overlays
+    renderer.handle_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_g))
+
+    for index in range(1, replay.total_frames):
+        renderer.draw(
+            replay.get_frame(index),
+            previous_frame=replay.get_frame(index - 1),
+            progress=0.5,
+            ghost_frame=index,
+        )
+
+    renderer.draw_death(replay.get_frame(replay.total_frames - 1), 3)
+    renderer.draw_preview([], "preview")
+
+
+def test_ghosts_are_drawn_over_pacman_and_hidden_while_he_dies() -> None:
+    result = _ghost_run()
+    frame = ReplayPlayer(result).get_frame(0)
+    ghost = frame.state.ghosts[0]
+
+    caught = frame.state.copy()
+    caught.pacman_position = ghost.position
+    renderer = PygameRenderer(result.maze, scale=1)
+    centre = renderer._tile_center(ghost.position)
+
+    renderer.draw(SimulationFrame(state=caught), ghost_frame=0)
+    assert renderer.screen.get_at(centre)[:3] == THEME.ghost_body["blinky"]
+
+    renderer.draw_death(SimulationFrame(state=caught), 0)
+    assert renderer.screen.get_at(centre)[:3] == THEME.player
+
+
+def test_live_and_replay_visualizers_with_ghosts() -> None:
+    result = _ghost_run()
+    live = LivePygameVisualizer(PygameRenderer(result.maze, scale=1), fps=1000)
+    replay = ReplayPlayer(result)
+
+    for index in range(replay.total_frames):
+        assert live(replay.get_frame(index))
+
+    visualizer = ReplayPygameVisualizer(PygameRenderer(result.maze, scale=1), ReplayPlayer(result), fps=10)
+    visualizer.playing = True
+
+    for elapsed in (0.0, 30.0, 60.0, 99.0):
+        visualizer.elapsed_ms = elapsed
+        visualizer._draw()

@@ -5,8 +5,10 @@ Text layouts: one character per tile, one line per row.
     .  corridor with pellet H  ghost house (decorative)
     o  corridor with pellet -  ghost gate (decorative)
        (space) corridor     P  Pac-Man start (corridor, no pellet)
+    G  ghost spawn          g  ghost spawn with a pellet
 
-`o` is a normal pellet: there are no power pellets.
+`o` is a normal pellet: there are no power pellets. Ghost spawns are corridor
+tiles; ghost i starts on the i-th spawn in reading order (row by row).
 """
 
 from pathlib import Path
@@ -28,6 +30,8 @@ LEGEND: frozendict[str, tuple[Tile, bool]] = frozendict(
         "o": (Tile.CORRIDOR, True),
         " ": (Tile.CORRIDOR, False),
         "P": (Tile.CORRIDOR, False),
+        "G": (Tile.CORRIDOR, False),
+        "g": (Tile.CORRIDOR, True),
         "_": (Tile.VOID, False),
         "H": (Tile.GHOST_HOUSE, False),
         "-": (Tile.GHOST_GATE, False),
@@ -35,6 +39,7 @@ LEGEND: frozendict[str, tuple[Tile, bool]] = frozendict(
 )
 
 START = "P"
+GHOST_SPAWNS = ("G", "g")
 
 # tile -> character for format_layout; pellets and the start are handled separately
 _TILE_CHARACTERS: frozendict[Tile, str] = frozendict(
@@ -72,6 +77,7 @@ def parse_layout(text: str, name: str) -> Maze:
     topography: list[list[int]] = []
     pellets: set[Position] = set()
     starts: list[Position] = []
+    ghost_spawns: list[Position] = []
 
     for row, line in enumerate(lines):
         topography_row = []
@@ -92,6 +98,9 @@ def parse_layout(text: str, name: str) -> Maze:
             if character == START:
                 starts.append((row, col))
 
+            if character in GHOST_SPAWNS:
+                ghost_spawns.append((row, col))
+
         topography.append(topography_row)
 
     if len(starts) != 1:
@@ -105,6 +114,7 @@ def parse_layout(text: str, name: str) -> Maze:
         pacman_start=starts[0],
         pellets=pellets,
         origin=MazeOrigin(source="layout", name=name),
+        ghost_spawns=ghost_spawns,
     )
 
 
@@ -118,6 +128,7 @@ def format_layout(maze: Maze) -> str:
     """The inverse of parse_layout (pellets are written as '.')."""
 
     lines = []
+    spawns = set(maze.ghost_spawns)
 
     for row in range(maze.height):
         characters = []
@@ -127,6 +138,8 @@ def format_layout(maze: Maze) -> str:
 
             if position == maze.pacman_start:
                 characters.append(START)
+            elif position in spawns:
+                characters.append("g" if position in maze.initial_pellets else "G")
             elif position in maze.initial_pellets:
                 characters.append(".")
             else:

@@ -38,6 +38,17 @@ class Theme:
     highlight: Color = (235, 64, 52)
     highlight_alpha: int = 120
 
+    # Ghosts, by kind: the body, and the overlay (path and target) drawn for it.
+    ghost_body: frozendict[str, Color] = frozendict({"blinky": (255, 40, 40)})
+    ghost_overlay: frozendict[str, Color] = frozendict({"blinky": (255, 135, 135)})
+    ghost_eye: Color = (240, 240, 255)
+    ghost_pupil: Color = (40, 60, 220)
+    # Spawn stickers: a dim ghost silhouette on each spawn tile, in the colour of
+    # the ghost that starts there (neutral when no run says which ghost).
+    sticker: int = 6
+    sticker_alpha: int = 85
+    sticker_neutral: Color = (190, 170, 220)
+
     @property
     def sprite_offset(self) -> int:
         """

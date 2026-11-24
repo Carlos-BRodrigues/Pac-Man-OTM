@@ -1,6 +1,7 @@
 from typing import Any
 
 from pacman_otm.mazes.maze import Maze
+from pacman_otm.simulation.ghosts import GhostState
 
 
 class SimulationState:
@@ -10,6 +11,8 @@ class SimulationState:
     steps: int
     terminated: bool
     termination_reason: str | None
+    # Immutable, so copies share it safely. The engine fills it from the maze's spawns.
+    ghosts: tuple[GhostState, ...]
 
     def __init__(self, maze: Maze):
 
@@ -20,6 +23,8 @@ class SimulationState:
 
         self.terminated = False
         self.termination_reason = None
+
+        self.ghosts = ()
 
     def collect_pellet(self) -> None:
 
@@ -39,6 +44,7 @@ class SimulationState:
         new_state.steps = self.steps
         new_state.terminated = self.terminated
         new_state.termination_reason = self.termination_reason
+        new_state.ghosts = self.ghosts
 
         return new_state
 
@@ -49,6 +55,7 @@ class SimulationState:
             "steps": self.steps,
             "terminated": self.terminated,
             "termination_reason": self.termination_reason,
+            "ghosts": [ghost.to_dict() for ghost in self.ghosts],
         }
 
     def summary(self) -> dict[str, Any]:
@@ -58,6 +65,7 @@ class SimulationState:
             "steps": self.steps,
             "terminated": self.terminated,
             "termination_reason": self.termination_reason,
+            "ghost_positions": [ghost.position for ghost in self.ghosts],
         }
 
     def __str__(self) -> str:

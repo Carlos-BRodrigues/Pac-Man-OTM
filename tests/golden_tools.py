@@ -4,6 +4,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from pacman_otm.controllers.ghosts.registry import create_ghosts, ghost_lineup
 from pacman_otm.controllers.registry import create_controller_registry
 from pacman_otm.mazes.maze import Maze
 from pacman_otm.simulation.engine import SimulationEngine
@@ -28,37 +29,44 @@ def maze_factories() -> dict[str, Callable[[], Maze]]:
     }
 
 
-# (golden file name, controller, maze, seed)
+# (golden file name, controller, maze, seed); a "_blinky" maze runs with the
+# maze's ghosts, the others without any.
 GOLDEN_CASES = [
     ("nearest-pellet_small", "nearest-pellet", "small", 42),
     ("nearest-pellet_classic", "nearest-pellet", "classic", 42),
     ("random-walk_small_seed7", "random-walk", "small", 7),
+    ("nearest-pellet_classic_blinky", "nearest-pellet", "classic_blinky", 42),
 ]
 
 
 def run_case(controller_name: str, maze_name: str, seed: int) -> SimulationResult:
-    maze = maze_factories()[maze_name]()
+    with_ghosts = maze_name.endswith("_blinky")
+    maze = maze_factories()[maze_name.removesuffix("_blinky")]()
     controller = create_controller_registry().create(controller_name, maze, seed)
+    kinds = ghost_lineup(maze) if with_ghosts else ()
 
     return run_simulation(
-        engine=SimulationEngine(maze),
+        engine=SimulationEngine(maze, kinds),
         controller=controller,
         max_steps=1000,
+        ghosts=create_ghosts(maze, kinds),
     )
 
 
 def summarize(result: SimulationResult) -> dict[str, Any]:
     """
     A compact, timing-free fingerprint of a run. The engine is deterministic,
-    so positions plus pellet counts pin down the full history.
+    so positions plus pellet counts pin down the full history. Ghost data
+    appears only in runs with ghosts, so runs without them keep their old
+    fingerprints.
     """
     metrics = {
         key: value
         for key, value in result.metrics.to_dict().items()
-        if key not in TIMING_FIELDS
+        if key not in TIMING_FIELDS and not (key == "ghosts" and value == 0)
     }
 
-    return {
+    summary = {
         "controller": result.controller,
         "actions": [action.value for action in result.actions],
         "states": [
@@ -77,3 +85,15 @@ def summarize(result: SimulationResult) -> dict[str, Any]:
         ],
         "metrics": metrics,
     }
+
+    if result.metrics.ghosts:
+        summary["ghosts"] = [
+            [[*ghost.position, ghost.direction.value if ghost.direction else None] for ghost in state.ghosts]
+            for state in result.states
+        ]
+        summary["ghost_decisions"] = [
+            [None if status is None else status.decision.value for status in step]
+            for step in result.ghost_statuses
+        ]
+
+    return summary

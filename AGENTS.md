@@ -29,6 +29,7 @@ python -m pacman_otm mazes save twisty my-twisty --maze-seed 4 --layout   # edit
 python -m pacman_otm simulate --maze twisty --visualize           # random maze, not saved
 python -m pacman_otm simulate --maze open-lattice --maze-seed 7 --save
 python -m pacman_otm play --maze small
+python -m pacman_otm play --maze classic --ghosts 2                # Blinky x2 (classic has 1 by default)
 python -m pacman_otm experiment --maze open-lattice --runs 20 --seed 42 --visualize
 python -m pacman_otm experiment --maze my-mazes                   # a maze set: run i plays maze i
 python -m pacman_otm replay results/nearest-pellet_open-lattice   # every run of an experiment
@@ -41,6 +42,10 @@ Behaviour worth knowing before changing the CLI:
   A recipe without `--maze-seed` gets a random seed, printed and recorded in the result; a random seed whose
   build fails (`MazeGenerationFailed`) is replaced, up to 10 tries. A given seed is never replaced. `--maze-set KEY=VALUE`
   overrides recipe values. Recipe sizes may be ranges; the size is drawn from the maze seed.
+- `--ghosts N` (every maze command): the number of ghosts, all Blinky. Default: the maze's own spawns (layout `G`/`g`,
+  recipe `content.ghosts.count`; classic and the starter recipes have 1). A recipe re-places spawns from its ghost
+  seed stream; a layout/saved maze keeps its spawns first and adds seeded ones. Tiles and pellets never change.
+  `--ghosts 0` plays without ghosts. A ghost catching Pac-Man ends the run as `caught`.
 - `experiment`: `--seed` is the experiment seed; run i gets maze and controller seeds from
   `derive_run_seeds(seed, i)`, so controllers with the same `--seed` see the same mazes. A recipe without
   `--maze-seed` gives every run its own maze. `--visualize` shows runs live; closing the window stops the
@@ -49,7 +54,7 @@ Behaviour worth knowing before changing the CLI:
   or `--output NAME`.
 - `replay` takes a result file or an experiment folder (bare names are looked up in `results/`). Controls:
   Space play/pause, ←/→ step, Home/End jump, ↑/↓ speed, PageDown/`]` and PageUp/`[` next/previous run,
-  A auto-advance, Esc quit.
+  A auto-advance, Esc quit. T/P toggle Pac-Man's target/path overlays, G the ghosts' (live views too).
 - Play controls: after a 2 s "READY!" hold, Pac-Man always moves (starting left); arrows/WASD change direction,
   and a turn pressed early is taken at the next opening. Esc quits.
 - `simulate`, `play`, `replay`, `experiment`, `mazes preview` and `sprites` take `--scale N`.
@@ -60,31 +65,33 @@ Behaviour worth knowing before changing the CLI:
 |---|---|
 | `simulation/actions.py` | `Action` enum (UP/DOWN/LEFT/RIGHT). A leaf module; imports nothing internal. |
 | `mazes/tiles.py` | `Tile` enum and `TILE_RULES` (walkable, pellet allowed). Tile values are stored in results: never renumber. Behaviour comes from the rules, never from `== 0`. |
-| `mazes/maze.py` | `Maze`: immutable grid, start, pellets, `origin`; validates tiles, positions and pellet reachability; precomputed neighbour table (`MOVEMENTS` order). |
-| `mazes/layout.py`, `mazes/layouts/*.txt` | Text layouts (`# . o space P _ H -`): `parse_layout`, `load_layout`, `format_layout`. Trailing spaces are tiles. |
+| `mazes/maze.py` | `Maze`: immutable grid, start, pellets, ordered `ghost_spawns` (content like pellets: walkable, distinct, not the start), `origin`; validates tiles, positions and reachability; precomputed neighbour table (`MOVEMENTS` order). |
+| `mazes/layout.py`, `mazes/layouts/*.txt` | Text layouts (`# . o space P _ H - G g`; `G`/`g` = ghost spawn without/with pellet, in reading order): `parse_layout`, `load_layout`, `format_layout`. Trailing spaces are tiles. |
 | `mazes/grid.py` | Pure numpy helpers on a tile grid: masks, neighbour counts, k×k windows, components, straight runs, corridor chains. `MIN_MAZE_SIZE`/`MAX_MAZE_SIZE` (5–101). No `Maze` import. |
 | `mazes/rules/` | `Rule` (frozen dataclass; fields = parameters), `Violation` (rule, message, positions), `RuleSet`. `hard.py` (`HARD_RULES`: size_bounds, connected, enclosed), `local.py` (max_block, min_wall_thickness, no_diagonal_contact), `structure.py` (dead ends, straight run, corridor length, junction share, loops, walkable fraction, mirror symmetry), `registry.py` (name → rule, built from TOML/JSON config with errors naming the field). Rules see tiles only. |
 | `mazes/config.py` | `ConfigError`, `convert` and key checks for plain config values; errors name the field. |
-| `mazes/generation/` | Topography generation. `shapes.py`: region masks (rectangle, ellipse, blob, layout), `playable_area`, `frame_grid`, `trim_outer_wall` (hidden outer wall → void). `lattice.py`: `LatticeParams` + `generate_lattice(region, params, rules, rng)`: lines → candidate graph → spanning tree (straightness bias, node dropout, mirror orbits) → repairs driven by violation positions → final full rule check. `grow.py`: `GrowParams` + `generate_grow`: organic mazes dug path by path from a ring or centre loop (rule-driven targets, clearance paths, bridges, restarts). `errors.py`: `GenerationError` (names the rule and a fix). `registry.py`: generator names. `content.py`: start placers (center, random, layout) and pellet placers (all_corridors, density, exclude_near_start). `recipe.py`: `MazeRecipe`, `load_recipe` (TOML), `recipe_from_dict`, `apply_overrides` (`--maze-set`). `pipeline.py`: `build_maze(recipe, seed)` with separate seed streams for shape, topography, start and pellets; the origin records the full recipe, seed and package version. |
+| `mazes/generation/` | Topography generation. `shapes.py`: region masks (rectangle, ellipse, blob, layout), `playable_area`, `frame_grid`, `trim_outer_wall` (hidden outer wall → void). `lattice.py`: `LatticeParams` + `generate_lattice(region, params, rules, rng)`: lines → candidate graph → spanning tree (straightness bias, node dropout, mirror orbits) → repairs driven by violation positions → final full rule check. `grow.py`: `GrowParams` + `generate_grow`: organic mazes dug path by path from a ring or centre loop (rule-driven targets, clearance paths, bridges, restarts). `errors.py`: `GenerationError` (names the rule and a fix). `registry.py`: generator names. `content.py`: start placers (center, random, layout), pellet placers (all_corridors, density, exclude_near_start) and the ghost placer (`random`: count, min_distance; `place_ghost_spawns` keeps fixed spawns first and is prefix-stable). `recipe.py`: `MazeRecipe`, `load_recipe` (TOML), `recipe_from_dict`, `apply_overrides` (`--maze-set`). `pipeline.py`: `build_maze(recipe, seed)` with separate seed streams for shape, topography, start, pellets, size and ghosts; `with_ghost_count(maze, n, seed)` for layouts and saved mazes; the origin records the full recipe, seed and package version. |
 | `mazes/analysis.py` | `analyze(maze) -> MazeMetrics`: measurements only, no thresholds. Saved under `maze.metrics` in results; recomputed on load. |
 | `mazes/origin.py`, `mazes/serialization.py` | `MazeOrigin` (how a maze was made: layout/generated, name, generator, params, seed); maze ↔ dict for results. |
 | `mazes/recipes/*.toml` | Starter recipes (open-lattice, wide-halls, blob-lattice, classic-like, twisty, organic, grotto), registered by file stem. `mazes/saved/` is written by `mazes generate --save`. |
 | `mazes/registry.py` | Layouts, recipes and saved mazes as named `MazeSource`s (`kind`, `build(seed)`); a name in two folders is an error. `resolve_maze_source(spec, overrides)`, `resolve_maze(spec, maze_seed, overrides)`, `save_maze` / `load_saved_maze`, `DEFAULT_MAZE`. |
 | `mazes/sets.py`, `mazes/sets/*.toml` | Maze sets: fixed lists of layout/saved mazes (no recipes) for `experiment --maze SET`; run i plays maze i mod K. A set name may not also be a maze name. |
 | `experiments/seeding.py` | `derive_run_seeds(experiment_seed, run_index)` → independent maze and controller seeds. |
-| `simulation/state.py` | `SimulationState`: position, remaining pellets, steps, termination. `copy()` / `to_dict()`. |
-| `simulation/engine.py` | `SimulationEngine`: the game rules. Executes an action, updates state, records history. Decides nothing. |
-| `algorithms/pathfinding/` | Pathfinders (`BreadthFirstSearch.find_path(maze, start, goal) -> list[Action] \| None`). Pure; no game decisions. |
+| `simulation/state.py` | `SimulationState`: position, remaining pellets, steps, termination, `ghosts` (tuple of `GhostState`). `copy()` / `to_dict()`. |
+| `simulation/ghosts.py` | `GhostState(kind, position, direction)` (frozen) and `CAUGHT_REASON`. |
+| `simulation/engine.py` | `SimulationEngine(maze, ghosts=kinds)`: the game rules. Executes Pac-Man's and every ghost's move at once, enforces the ghost movement rule (walkable, no reverse except at a dead end; raises otherwise), ends the run as `caught` (same tile or head-on swap; beats `completed`), records history. Decides nothing. |
+| `algorithms/pathfinding/` | Pathfinders (`BreadthFirstSearch.find_path(maze, start, goal) -> list[Action] \| None`; `NoReverseSearch(maze).find_path(start, heading, goal)`: shortest path that never reverses except at dead ends, ties in `MOVEMENTS` order). Pure; no game decisions. |
 | `algorithms/graph/` | `MetricClosure` (start + pellet distance matrix: `nodes`, `distances`) and `mst.py` (`mst_weight`, Prim: the tour lower bound). |
 | `algorithms/tours/` | Pure tour algorithms on a distance matrix, open paths from node 0: `nearest_neighbour_tour`, `two_opt`, `held_karp_tour` (at most 16 pellets, `TourTooLargeError`), `tour_length`. No maze or game knowledge. |
 | `controllers/algorithmic/tours/` | `TourController` (plans on the first decision, walks the tour with BFS, skips eaten pellets, reports `describe()["tour"]`); `held-karp`, `two-opt` (NN + 2-opt; lower bound, gap, improvement over NN), `nearest-pellet-tour` (online, closure-driven; lower bound and gap). |
 | `controllers/controller.py` | `Controller`: `select_action(state) -> Action`, `reset()`, `describe()` (saved in results), optional `ControllerStatus`. `ControllerAborted(reason)` ends a run from inside a decision. |
 | `controllers/algorithmic/` | Deterministic autonomous controllers (`AlgorithmicController`), e.g. `simple/nearest_pellet.py`. |
+| `controllers/ghosts/` | `GhostController(maze, ghost_index)`: moves every step, never reverses, decides the exit of the tile it moves onto one step early (final: juking works), publishes `GhostStatus` (target, path, decision, options, decided). Subclasses give `target(state)`: `Blinky` = Pac-Man's tile. `registry.py`: `GHOST_KINDS`, `ghost_lineup(maze)` (one Blinky per spawn), `create_ghosts`. |
 | `controllers/stochastic/` | `StochasticController` owns a seeded `self.rng`; `describe()` records the seed. E.g. `random_walk.py`. |
 | `controllers/manual/` | `ManualController(action_source)`: a human player; the input source is injected (no UI imports). |
 | `controllers/registry.py` | `create_controller_registry()`: every controller buildable from `(maze, seed)`; the CLI choices. |
-| `simulation/runner.py` | `run_simulation`: the loop that asks the controller, steps the engine, emits frames, times decisions. |
-| `simulation/result.py` | `SimulationResult`: the complete recorded run (states, actions, statuses, metrics, maze) + JSON I/O. |
+| `simulation/runner.py` | `run_simulation(..., ghosts=controllers)`: asks Pac-Man's controller then each ghost on the same state, steps the engine, emits frames, times Pac-Man's decisions. |
+| `simulation/result.py`, `encoding.py` | `SimulationResult`: the complete recorded run (states, actions, statuses, ghost statuses, ghost controllers, metrics, maze) + JSON I/O. Format 4 is compact on disk (positions, eaten-pellet events, move strings, `r,c:MOVES` paths) and rebuilds every state on load. |
 | `simulation/replay.py`, `frame.py` | `ReplayPlayer` navigates a `SimulationResult` only. `SimulationFrame` = state + action + status. |
 | `statistics_/` | `SimulationMetrics` (aggregate numbers) and `pretty_json`. |
 | `experiments/runner.py` | Batch runs with seeds; writes per-run JSON plus `results.json` / `results.csv` aggregates. Each run record carries `maze_seed` (the seed that built its maze) and `maze_*` metric columns; `maze_info` (e.g. the recipe of per-run mazes) is written once under `experiment`. |
@@ -92,8 +99,8 @@ Behaviour worth knowing before changing the CLI:
 | `visualization/experiment.py`, `preview.py` | `ExperimentVisualizer` (the runner's `on_run_start`: a live visualizer per run, a new maze each time) and `run_maze_preview`. |
 | `visualization/` | Pygame renderer, live visualizer (an `on_frame` callback), replay visualizer, `keyboard.py` (action source for `play`). Draws frames and reads input, no game rules. |
 | `visualization/theme.py` | All colours and pixel geometry (8x8 base-pixel tiles, 13x13 sprites, wall recess). Change the look here. |
-| `visualization/maze_art.py`, `sprites.py` | Maze background rendered once from masks (recessed, rounded outline walls); procedural player and death sprites. Original art: do not copy arcade sprites. |
-| `visualization/animation.py` | Player poses derived from recorded positions only (chomp loop, facing, freeze when blocked); 4 in-between frames per step, display only. |
+| `visualization/maze_art.py`, `sprites.py` | Maze background rendered once from masks (recessed, rounded outline walls); procedural player, death and ghost sprites (2-frame hem, eyes follow the heading) and spawn stickers. Original art: do not copy arcade sprites. |
+| `visualization/animation.py` | Player poses derived from recorded positions only (chomp loop, facing, freeze when blocked); 5 in-between frames per step, display only. Ghost hem frame from wall-clock time (`ghost_frame_at`). |
 | `maze_commands.py`, `cli_types.py` | The `mazes` command family and the shared `--maze/--maze-seed/--maze-set` options; argparse types. |
 | `cli.py` | Argument parsing and wiring. No logic beyond assembling components. |
 
@@ -103,7 +110,7 @@ Behaviour worth knowing before changing the CLI:
 2. **Pathfinding is a tool, not a player.** BFS (and future A*, Dijkstra…) answers "shortest path from A to B".
    Choosing *which* B is the controller's job.
 3. **Controllers are the players.** They receive state, choose a target, plan, and return one `Action`.
-   They must not mutate the state they receive or reach into the engine.
+   They must not mutate the state they receive or reach into the engine. Ghosts are controllers too.
 4. **The runner coordinates; it does not absorb other layers' work.**
 5. **History is first-class.** Every run keeps the full state, action and status history.
    Never replace history with aggregates only. Metrics complement history; they don't substitute for it.
@@ -171,6 +178,5 @@ regenerate them (`python tests/make_golden.py`) when the change is intended, and
 - `statistics_/metrics.py` and `simulation/result.py` import `SimulationEngine`; metrics could instead be
   computed from a recorded history, keeping statistics independent of the live engine.
 - The tunnel row in the classic maze has no wrap-around.
-- Each saved state carries the full remaining-pellet set; storing per-step deltas would shrink files
-  further but changes the result format.
+- Ghosts move at Pac-Man's speed (one tile per step); there are no frightened/scatter modes or power pellets.
 - `src/test.py` is an old manual script; the real tests live in `tests/`.

@@ -3,6 +3,7 @@ Measurements of a maze. No thresholds here: rules decide what is acceptable,
 these numbers describe what a maze is like (and go into results).
 """
 
+from collections import deque
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -43,6 +44,9 @@ class MazeMetrics:
     symmetric_horizontal: bool
     symmetric_vertical: bool
     pellets: int
+    ghost_spawns: int
+    # Steps from Pac-Man's start to the closest ghost spawn; None without ghosts.
+    nearest_ghost_spawn: int | None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -62,6 +66,23 @@ def largest_block(mask: np.ndarray) -> int:
             high = size - 1
 
     return low
+
+
+def start_distances(maze: Maze) -> dict[tuple[int, int], int]:
+    """BFS steps from Pac-Man's start to every reachable tile."""
+
+    steps = {maze.pacman_start: 0}
+    frontier = deque([maze.pacman_start])
+
+    while frontier:
+        current = frontier.popleft()
+
+        for neighbour in maze.get_valid_movements(current).values():
+            if neighbour not in steps:
+                steps[neighbour] = steps[current] + 1
+                frontier.append(neighbour)
+
+    return steps
 
 
 def analyze(maze: Maze) -> MazeMetrics:
@@ -94,4 +115,10 @@ def analyze(maze: Maze) -> MazeMetrics:
         symmetric_horizontal=symmetric("horizontal"),
         symmetric_vertical=symmetric("vertical"),
         pellets=len(maze.initial_pellets),
+        ghost_spawns=len(maze.ghost_spawns),
+        nearest_ghost_spawn=(
+            min(start_distances(maze)[spawn] for spawn in maze.ghost_spawns)
+            if maze.ghost_spawns
+            else None
+        ),
     )

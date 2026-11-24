@@ -13,7 +13,9 @@ Position = tuple[int, int]
 
 class Maze:
     """
-    The static map: tiles, Pac-Man's start and the initial pellets.
+    The static map: tiles, Pac-Man's start, the initial pellets and the ghost
+    spawns. Spawns are content like pellets: ordered (ghost i starts on spawn i),
+    walkable, distinct, never the start, and a pellet may lie on one.
 
     Immutable after construction (read-only array, frozenset of pellets), so
     one Maze can be shared by many runs and by every state that refers to it.
@@ -36,6 +38,7 @@ class Maze:
         pacman_start: Position,
         pellets: Iterable[Position],
         origin: MazeOrigin | None = None,
+        ghost_spawns: Iterable[Position] = (),
     ) -> None:
 
         self.topography = self._build_topography(topography)
@@ -44,6 +47,9 @@ class Maze:
         self.pacman_start: Position = tuple(pacman_start)
         self.initial_pellets: frozenset[Position] = frozenset(
             tuple(position) for position in pellets
+        )
+        self.ghost_spawns: tuple[Position, ...] = tuple(
+            tuple(position) for position in ghost_spawns
         )
         self.origin = origin
 
@@ -175,6 +181,16 @@ class Maze:
                 f"e.g. {misplaced[:5]}."
             )
 
+        for spawn in self.ghost_spawns:
+            if not self.is_walkable(spawn):
+                raise ValueError(f"Ghost spawn {spawn} must be on a walkable tile.")
+
+            if spawn == self.pacman_start:
+                raise ValueError(f"Ghost spawn {spawn} is Pac-Man's start.")
+
+        if len(set(self.ghost_spawns)) != len(self.ghost_spawns):
+            raise ValueError(f"Ghost spawns must be distinct tiles, got {list(self.ghost_spawns)}.")
+
     def _build_neighbours(self) -> dict[Position, frozendict[Action, Position]]:
         neighbours = {}
 
@@ -193,7 +209,7 @@ class Maze:
         return neighbours
 
     def _validate_reachability(self) -> None:
-        """Every pellet must be collectable, or no run could ever complete."""
+        """Every pellet must be collectable, or no run could ever complete; every ghost must reach Pac-Man."""
 
         reached = {self.pacman_start}
         frontier = deque([self.pacman_start])
@@ -203,6 +219,13 @@ class Maze:
                 if neighbour not in reached:
                     reached.add(neighbour)
                     frontier.append(neighbour)
+
+        unreachable_spawns = [spawn for spawn in self.ghost_spawns if spawn not in reached]
+
+        if unreachable_spawns:
+            raise ValueError(
+                f"Ghost spawn(s) {unreachable_spawns} cannot be reached from the start {self.pacman_start}."
+            )
 
         unreachable = sorted(self.initial_pellets - reached)
 

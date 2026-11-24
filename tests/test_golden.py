@@ -24,3 +24,5 @@ def test_matches_golden(file_name: str, controller: str, maze: str, seed: int) -
     assert actual["status_targets"] == expected["status_targets"]
     assert actual["metrics"] == expected["metrics"]
     assert actual["controller"] == expected["controller"]
+    assert actual.get("ghosts") == expected.get("ghosts")
+    assert actual.get("ghost_decisions") == expected.get("ghost_decisions")

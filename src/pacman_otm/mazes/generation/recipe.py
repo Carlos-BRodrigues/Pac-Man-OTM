@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, get_type_hints
 
 from pacman_otm.mazes.config import ConfigError, check_keys, convert, keyword_params
-from pacman_otm.mazes.generation.content import PELLET_PLACERS, START_PLACERS
+from pacman_otm.mazes.generation.content import GHOST_PLACERS, PELLET_PLACERS, START_PLACERS
 from pacman_otm.mazes.generation.errors import GenerationError
 from pacman_otm.mazes.generation.registry import GENERATORS, SHAPES
 from pacman_otm.mazes.grid import MAX_MAZE_SIZE, MIN_MAZE_SIZE, TILE_KINDS
@@ -23,12 +23,14 @@ from pacman_otm.mazes.rules.base import Rule, RuleSet
 from pacman_otm.mazes.rules.registry import rule_from_config
 
 TOP_LEVEL_KEYS = ("name", "description", "size", "shape", "topography", "rules", "content")
-CONTENT_KEYS = ("pellets", "start")
+CONTENT_KEYS = ("pellets", "start", "ghosts")
 
 DEFAULT_SHAPE = "rectangle"
 DEFAULT_GENERATOR = "lattice"
 DEFAULT_PELLETS = "all_corridors"
 DEFAULT_START = "center"
+# Without a [content.ghosts] table a recipe places no ghost spawns (count 0).
+DEFAULT_GHOSTS = "random"
 
 
 class RecipeError(ConfigError):
@@ -64,6 +66,7 @@ class MazeRecipe:
     rules: tuple[Rule, ...]
     pellets: Component
     start: Component
+    ghosts: Component = Component(name=DEFAULT_GHOSTS, params=frozendict())
 
     @property
     def rule_set(self) -> RuleSet:
@@ -101,6 +104,7 @@ class MazeRecipe:
                 "content": {
                     "pellets": self.pellets.to_dict("placer"),
                     "start": self.start.to_dict("placer"),
+                    "ghosts": self.ghosts.to_dict("placer"),
                 },
             }
         )
@@ -161,6 +165,7 @@ def _recipe_from_dict(data: dict[str, Any], default_name: str) -> MazeRecipe:
 
     pellets = _component(content.get("pellets"), "content.pellets", "placer", DEFAULT_PELLETS, PELLET_PLACERS, skip=3)
     start = _component(content.get("start"), "content.start", "placer", DEFAULT_START, START_PLACERS, skip=2)
+    ghosts = _component(content.get("ghosts"), "content.ghosts", "placer", DEFAULT_GHOSTS, GHOST_PLACERS, skip=3)
 
     if start.name == "layout" and "path" not in start.params and shape.name != "layout":
         raise RecipeError(
@@ -178,6 +183,7 @@ def _recipe_from_dict(data: dict[str, Any], default_name: str) -> MazeRecipe:
         rules=rules,
         pellets=pellets,
         start=start,
+        ghosts=ghosts,
     )
 
 
@@ -206,6 +212,7 @@ def apply_overrides(recipe: MazeRecipe, overrides: list[str] | tuple[str, ...]) 
         size=11x21..51x51 (a range)     size.width=[21, 51]
         shape.kind=ellipse              topography.extra_loops=0.3
         content.pellets.placer=density  content.pellets.p=0.4
+        content.ghosts.count=3          content.ghosts.min_distance=12
         rules.max_dead_ends.count=2     rules.max_block.wall.size=4
         rules.max_dead_ends=off
 
@@ -358,7 +365,7 @@ def _apply(data: dict[str, Any], parts: list[str], value: Any) -> None:
     raise RecipeError(
         "unknown key; use name, description, size, size.height, size.width, shape.<param>, "
         "topography.<param>, rules.<rule>.<param>, rules.<rule>=off, "
-        "content.pellets.<param> or content.start.<param>."
+        "content.pellets.<param>, content.start.<param> or content.ghosts.<param>."
     )
 
 

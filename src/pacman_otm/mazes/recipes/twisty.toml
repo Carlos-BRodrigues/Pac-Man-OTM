@@ -34,3 +34,8 @@ distance = 2
 
 [content.start]
 placer = "random"
+
+[content.ghosts]
+placer = "random"
+count = 1                # ghost spawns; --ghosts N overrides
+min_distance = 10        # BFS steps from the start

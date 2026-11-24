@@ -15,8 +15,12 @@ from pacman_otm.mazes.analysis import analyze
 from pacman_otm.mazes.config import ConfigError
 from pacman_otm.mazes.generation.errors import GenerationError
 from pacman_otm.mazes.registry import MazeSpecError
+from pacman_otm.controllers.ghosts.ghost import GhostController
+from pacman_otm.controllers.ghosts.registry import create_ghosts, ghost_lineup
 from pacman_otm.controllers.manual.manual import ManualController
+from pacman_otm.mazes.maze import Maze
 from pacman_otm.simulation.engine import SimulationEngine
+from pacman_otm.simulation.ghosts import CAUGHT_REASON
 from pacman_otm.simulation.runner import DEFAULT_MAX_STEPS, run_simulation
 from pacman_otm.experiments.runner import ExperimentRunner
 
@@ -92,9 +96,15 @@ def describe_tour(tour: dict | None) -> str:
     return text
 
 
+def create_engine_and_ghosts(maze: Maze) -> tuple[SimulationEngine, list[GhostController]]:
+    """The maze's ghosts (one Blinky per ghost spawn): an engine that places them and their controllers."""
+    kinds = ghost_lineup(maze)
+    return SimulationEngine(maze, kinds), create_ghosts(maze, kinds)
+
+
 def run_simulate(args: argparse.Namespace) -> None:
     source, maze, maze_seed = load_maze(args.maze, args)
-    engine = SimulationEngine(maze)
+    engine, ghosts = create_engine_and_ghosts(maze)
     controller = create_controller(args.controller, maze, args.seed)
 
     visualizer = None
@@ -109,6 +119,7 @@ def run_simulate(args: argparse.Namespace) -> None:
             controller=controller,
             max_steps=args.max_steps,
             on_frame=visualizer if visualizer is not None else None,
+            ghosts=ghosts,
         )
 
         if visualizer is not None and visualizer.renderer.is_open:
@@ -134,7 +145,7 @@ def run_simulate(args: argparse.Namespace) -> None:
 
 def run_play(args: argparse.Namespace) -> None:
     source, maze, maze_seed = load_maze(args.maze, args)
-    engine = SimulationEngine(maze)
+    engine, ghosts = create_engine_and_ghosts(maze)
 
     renderer = PygameRenderer(maze, scale=args.scale)
     # Arcade-style "READY!" hold before Pac-Man starts moving
@@ -150,6 +161,7 @@ def run_play(args: argparse.Namespace) -> None:
             controller=controller,
             max_steps=args.max_steps,
             on_frame=visualizer,
+            ghosts=ghosts,
         )
 
         if renderer.is_open:
@@ -163,7 +175,7 @@ def run_play(args: argparse.Namespace) -> None:
 
 
 def run_experiment(args: argparse.Namespace) -> None:
-    mazes = experiment_mazes(args.maze, args.maze_set, args.maze_seed)
+    mazes = experiment_mazes(args.maze, args.maze_set, args.maze_seed, args.ghosts)
     name = args.name or f"{args.controller}_{mazes.label}"
 
     if args.runs is None:
@@ -248,6 +260,10 @@ def run_experiment(args: argparse.Namespace) -> None:
         print(f"Stopped after {len(results.runs)} of {args.runs} runs: the window was closed.")
 
     print(f"Completed runs: {completed}/{len(results.runs)}")
+
+    if any(run.metrics.ghosts for run in results.runs):
+        caught = sum(1 for run in results.runs if run.metrics.termination_reason == CAUGHT_REASON)
+        print(f"Caught by a ghost: {caught}/{len(results.runs)}")
     print(f"Mean steps: {mean_steps:.1f}")
     print(f"Output directory: {results.output_dir}")
 

@@ -1,10 +1,12 @@
 """
-Content placers: where Pac-Man starts and where the pellets are, given a
-finished tile grid. Placers never change tiles, and the start never gets a
-pellet (as with 'P' in layouts). Later, ghost spawns use the same interface.
+Content placers: where Pac-Man starts, where the pellets are and where the
+ghosts spawn, given a finished tile grid. Placers never change tiles, and the
+start never gets a pellet (as with 'P' in layouts). Spawns ignore pellets: a
+spawn may hold one, and the number of ghosts never changes the pellets.
 
 Start placers:  (grid, rng, **params) -> Position
 Pellet placers: (grid, start, rng, **params) -> set[Position]
+Ghost placers:  (grid, start, rng, **params) -> list[Position]  (ghost i starts on spawn i)
 """
 
 from collections import deque
@@ -121,5 +123,70 @@ PELLET_PLACERS = frozendict(
         "all_corridors": pellets_all_corridors,
         "density": pellets_density,
         "exclude_near_start": pellets_exclude_near_start,
+    }
+)
+
+
+# Ghost spawn placers
+
+
+DEFAULT_GHOST_MIN_DISTANCE = 10
+
+
+def ghosts_random(
+    grid: np.ndarray,
+    start: Position,
+    rng: np.random.Generator,
+    count: int = 0,
+    min_distance: int = DEFAULT_GHOST_MIN_DISTANCE,
+) -> list[Position]:
+    """`count` distinct spawns at least `min_distance` steps (BFS) from the start."""
+    return place_ghost_spawns(grid, start, rng, count=count, min_distance=min_distance)
+
+
+def place_ghost_spawns(
+    grid: np.ndarray,
+    start: Position,
+    rng: np.random.Generator,
+    count: int,
+    min_distance: int = DEFAULT_GHOST_MIN_DISTANCE,
+    fixed: tuple[Position, ...] = (),
+) -> list[Position]:
+    """
+    `count` distinct spawns at least `min_distance` steps (BFS) from the start.
+
+    `fixed` spawns (a layout's G tiles) come first, as given. The others are a
+    seeded shuffle of the eligible tiles, taken in order, so a larger count only
+    adds spawns: the first ones stay where they are.
+    """
+    if count < 0:
+        raise GenerationError(f"content.ghosts.count must be >= 0, got {count}.")
+
+    if min_distance < 1:
+        raise GenerationError(f"content.ghosts.min_distance must be >= 1, got {min_distance}.")
+
+    fixed = [tuple(position) for position in fixed]
+
+    if count <= len(fixed):
+        return fixed[:count]
+
+    steps = _bfs_steps(walkable_mask(grid), start)
+    eligible = sorted(tile for tile, step in steps.items() if step >= min_distance and tile not in fixed)
+    needed = count - len(fixed)
+
+    if len(eligible) < needed:
+        raise GenerationError(
+            f"content.ghosts: {count} ghost spawn(s) need {needed} free tile(s) at least {min_distance} steps "
+            f"from the start, but only {len(eligible)} exist; lower content.ghosts.count or "
+            f"content.ghosts.min_distance (--maze-set content.ghosts.min_distance=N), or use --ghosts 0."
+        )
+
+    order = rng.permutation(len(eligible))
+    return fixed + [eligible[int(index)] for index in order[:needed]]
+
+
+GHOST_PLACERS = frozendict(
+    {
+        "random": ghosts_random,
     }
 )

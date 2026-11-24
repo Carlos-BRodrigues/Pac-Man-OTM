@@ -12,8 +12,9 @@ from dataclasses import dataclass
 
 from pacman_otm.mazes.maze import Maze
 from pacman_otm.simulation.actions import Action
+from pacman_otm.simulation.ghosts import CAUGHT_REASON
 from pacman_otm.simulation.state import SimulationState
-from pacman_otm.visualization.sprites import Mouth
+from pacman_otm.visualization.sprites import GHOST_FRAMES, Mouth
 
 Position = tuple[int, int]
 
@@ -88,10 +89,16 @@ def poses_for_states(states: list[SimulationState]) -> list[PlayerPose]:
     return poses
 
 
-# A run that ends this way plays the death sequence. No rule produces it yet;
-# it is reserved for ghosts.
-CAUGHT_REASON = "caught"
+# Ghosts swap their hem every GHOST_FRAME_MS of wall-clock time, not per step:
+# display only, so they keep moving during READY!, pauses and blocked steps.
+GHOST_FRAME_MS = 160
 
+
+def ghost_frame_at(milliseconds: int) -> int:
+    return milliseconds // GHOST_FRAME_MS % GHOST_FRAMES
+
+
+# A run that ends with CAUGHT_REASON (a ghost caught Pac-Man) plays the death sequence.
 DEATH_FPS = 8
 
 

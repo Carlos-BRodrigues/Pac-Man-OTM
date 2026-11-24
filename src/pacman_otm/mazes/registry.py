@@ -19,7 +19,7 @@ from typing import Literal
 
 from pacman_otm.mazes.config import ConfigError
 from pacman_otm.mazes.generation.errors import GenerationError
-from pacman_otm.mazes.generation.pipeline import build_maze
+from pacman_otm.mazes.generation.pipeline import build_maze, with_ghost_count
 from pacman_otm.mazes.generation.recipe import MazeRecipe, apply_overrides, load_recipe
 from pacman_otm.mazes.layout import LAYOUTS_DIR, load_layout
 from pacman_otm.mazes.maze import Maze
@@ -69,12 +69,20 @@ class MazeGenerationFailed(MazeSpecError):
 
 @dataclass(frozen=True)
 class MazeSource:
-    """Where a maze comes from. A recipe needs a seed to become a maze; the others ignore it."""
+    """
+    Where a maze comes from. A recipe needs a seed to become a maze; the others
+    use it only to place extra ghost spawns.
+
+    ghost_count (--ghosts) replaces the maze's own number of ghost spawns: for a
+    recipe it sets content.ghosts.count; a layout or saved maze keeps its own
+    spawns first and gets seeded random ones beyond them. Tiles never change.
+    """
 
     kind: MazeKind
     name: str
     path: Path
     overrides: tuple[str, ...] = ()
+    ghost_count: int | None = None
 
     @property
     def generated(self) -> bool:
@@ -84,20 +92,27 @@ class MazeSource:
         if self.kind != "recipe":
             raise MazeSpecError(f"'{self.name}' is a {self.kind}, not a recipe.")
 
+        overrides = self.overrides
+
+        if self.ghost_count is not None:
+            overrides = (*overrides, f"content.ghosts.count={self.ghost_count}")
+
         try:
-            return apply_overrides(load_recipe(self.path), self.overrides)
+            return apply_overrides(load_recipe(self.path), overrides)
         except ConfigError as error:
             raise MazeSpecError(str(error)) from error
 
     def build(self, seed: int = 0) -> Maze:
         try:
-            if self.kind == "layout":
-                return load_layout(self.path)
+            if self.kind == "recipe":
+                return build_maze(self.recipe(), seed)
 
-            if self.kind == "saved":
-                return load_saved_maze(self.path)
+            maze = load_layout(self.path) if self.kind == "layout" else load_saved_maze(self.path)
 
-            return build_maze(self.recipe(), seed)
+            if self.ghost_count is not None:
+                maze = with_ghost_count(maze, self.ghost_count, seed)
+
+            return maze
         except MazeSpecError:
             raise
         except GenerationError as error:
@@ -159,6 +174,7 @@ def resolve_maze_source(
     spec: str,
     overrides: list[str] | tuple[str, ...] = (),
     registry: MazeRegistry | None = None,
+    ghost_count: int | None = None,
 ) -> MazeSource:
     """A registered name, or a path to a .txt layout, .toml recipe or .json saved maze."""
 
@@ -193,6 +209,9 @@ def resolve_maze_source(
 
         source = replace(source, overrides=tuple(overrides))
 
+    if ghost_count is not None:
+        source = replace(source, ghost_count=ghost_count)
+
     return source
 
 
@@ -201,8 +220,9 @@ def resolve_maze(
     maze_seed: int = 0,
     overrides: list[str] | tuple[str, ...] = (),
     registry: MazeRegistry | None = None,
+    ghost_count: int | None = None,
 ) -> Maze:
-    return resolve_maze_source(spec, overrides, registry).build(maze_seed)
+    return resolve_maze_source(spec, overrides, registry, ghost_count).build(maze_seed)
 
 
 # Saved mazes: the full maze (tiles, start, pellets, origin), so a saved maze

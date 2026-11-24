@@ -1,7 +1,8 @@
 # Roadmap — Arbitrary and Generated Mazes
 
 Status: steps 0–8 done (latest commit `47537e8`); step 9 done as the `grow` generator, step 9.5 (smoothing)
-done (both uncommitted; see "Step 9 as built" and "Step 9.5" below). Step 10 (ghost features) remains. Revised 2026-11-23; replaces the earlier steps 5–7.
+done. Ghosts (Blinky) and the step 10 ghost-spawn placer are done (2026-11-24, see "Ghosts" below);
+the reserved ghost house and tunnel portals remain. Revised 2026-11-23; replaces the earlier steps 5–7.
 Added 2026-11-22: rule `max_corridor_length(length)` (step 5, done) and lattice params
 `straightness` and `node_dropout` (step 6); details in the implementation plan.
 Read `AGENTS.md` first; every rule there still applies.
@@ -107,6 +108,12 @@ three rules:
   down (`--scale N` stays pixel-exact). Before, the whole-number scale made similar mazes jump between window
   sizes. New starter recipe `grotto`: `grow` on an ellipse, centre start, mirrored, high noise and depth bonus.
 - Also in place: `experiments/seeding.py` (`derive_run_seeds`) and `ExperimentRunner(maze_factory=…)`.
+- **Ghosts (2026-11-24):** ghost spawns are maze content (`Maze.ghost_spawns`, layout `G`/`g`, recipe
+  `[content.ghosts]` with its own sixth seed stream, `--ghosts N`), so the ghost count never changes tiles or pellets.
+  `GhostController` (moves every step, never reverses except at dead ends, commits the exit of the next tile one step
+  early) with `Blinky` (targets Pac-Man's tile) and `NoReverseSearch` for the shortest legal path. Caught = same tile
+  or head-on swap. Result format 4 records ghost tracks and decisions compactly (a 1000-step 78x75 run: 4.9 MB ->
+  0.11 MB). Spawns are placed at random (min distance from the start), not yet around a reserved ghost house.
 
 ---
 
@@ -364,7 +371,7 @@ placer = "center"
 - 100 seeds pass
 - the output looks clearly non-lattice
 
-## Step 10 — Features for ghosts (when ghosts arrive)
+## Step 10 — Features for ghosts (spawn placer done; reserved features remain)
 
 - **Reserved features** are placed after the shape and before topography, as fixed regions the generator builds around:
   - decorative ghost house: a `GHOST_HOUSE` rectangle with a `GHOST_GATE` tile, a forced corridor ring around it

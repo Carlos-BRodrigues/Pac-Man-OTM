@@ -37,6 +37,7 @@ class ReplayPlayer:
 
         action = None
         status = None
+        ghost_statuses = ()
 
         if index > 0:
 
@@ -48,10 +49,14 @@ class ReplayPlayer:
             if action_index < len(self.result.statuses):
                 status = self.result.statuses[action_index]
 
+            if action_index < len(self.result.ghost_statuses):
+                ghost_statuses = self.result.ghost_statuses[action_index]
+
         return SimulationFrame(
             state=self.result.get_state(index),
             action=action,
             status=status,
+            ghost_statuses=ghost_statuses,
         )
 
     def seek(self, index: int) -> SimulationFrame:

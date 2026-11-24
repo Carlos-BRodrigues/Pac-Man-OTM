@@ -64,6 +64,24 @@ Changes one recipe value for this command only, and can be repeated. Some exampl
 Every key and value is described in the [recipe guide](recipes.md#changing-a-recipe-from-the-command-line---maze-set).
 `--maze-set` on a layout or saved maze is an error.
 
+### `--ghosts N`
+
+The number of ghosts. Every ghost is **Blinky**, the red ghost: he targets Pac-Man's tile and catches him by
+ending a step on Pac-Man's tile or by swapping tiles with him head-on (neighbouring tiles are safe). By default a
+maze brings its own ghosts: one per spawn (`G`/`g` in a layout, `content.ghosts.count` in a recipe). `classic` has
+one, above the ghost house, and every starter recipe has one.
+
+- `--ghosts 0` plays without ghosts.
+- On a recipe, `--ghosts N` sets `content.ghosts.count`: the same seed gives the same corridors and pellets, with
+  N spawns at least `content.ghosts.min_distance` steps from the start.
+- On a layout or saved maze, its own spawns come first; extra ones are placed at random from `--maze-seed`
+  (default 0), at least 10 steps from the start.
+
+**How ghosts move.** A ghost moves every step and never turns back, except at a dead end. It always knows the
+shortest path to its target that it can drive without reversing, but it can only choose at junctions. It decides
+one tile early: as it steps onto a junction, the exit it will take there is already fixed, using where Pac-Man
+was at that moment. A late turn by Pac-Man can therefore juke it.
+
 ---
 
 ## `simulate`
@@ -80,7 +98,7 @@ python -m pacman_otm simulate --maze small --controller random-walk --seed 7 --o
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--maze`, `--maze-seed`, `--maze-set` | `classic`, random | See [Choosing a maze](#choosing-a-maze). |
+| `--maze`, `--maze-seed`, `--maze-set`, `--ghosts` | `classic`, random, the maze's ghosts | See [Choosing a maze](#choosing-a-maze). |
 | `--controller` | `nearest-pellet` | `nearest-pellet`, `random-walk`, or a tour controller over the metric closure: `nearest-pellet-tour`, `two-opt` (nearest neighbour + 2-opt), `held-karp` (optimal, at most 16 pellets). Tour controllers print their tour length, MST lower bound and gap. |
 | `--seed N` | `42` | Seed for stochastic controllers such as `random-walk`. |
 | `--max-steps N` | `3000` | Stop after this many steps. |
@@ -93,7 +111,9 @@ python -m pacman_otm simulate --maze small --controller random-walk --seed 7 --o
 **Results are not saved unless you pass `--save` or `--output`.** A saved result holds the whole run and its maze,
 so `replay` needs nothing else.
 
-While visualizing: **T** toggles the controller's target, **P** its planned path. Close the window to stop.
+While visualizing: **T** toggles the controller's target, **P** its planned path, **G** every ghost's path and
+target (light red for Blinky). Close the window to stop. A run ends as `caught` when a ghost catches Pac-Man,
+and the death animation plays.
 
 ---
 
@@ -109,7 +129,8 @@ python -m pacman_otm play --maze classic-like --save
 After a 2-second "READY!" Pac-Man starts moving left and keeps moving. Steer with the **arrow keys** or **WASD**; a
 turn pressed early is taken at the next opening. **Esc** quits.
 
-The options are the same as `simulate` (`--maze…`, `--max-steps`, `--scale`, `--save`, `--output`).
+The options are the same as `simulate` (`--maze…`, `--ghosts`, `--max-steps`, `--scale`, `--save`, `--output`).
+Use `--ghosts 0` for a ghost-free run.
 Results are named `manual_<maze>_<timestamp>.json` and are saved only on request.
 
 ---
@@ -129,7 +150,7 @@ python -m pacman_otm experiment --maze my-mazes --controller nearest-pellet-tour
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--maze`, `--maze-set` | `classic` | See [Choosing a maze](#choosing-a-maze). |
+| `--maze`, `--maze-set`, `--ghosts` | `classic`, the maze's ghosts | See [Choosing a maze](#choosing-a-maze). Every controller meets the same ghosts on the same maze. `results.json` counts `caught_runs`; every run record has `ghosts`. |
 | `--maze-seed N` | none | With a recipe: one maze (seed N) for every run. Without it, each run gets its own maze. |
 | `--controller` | `nearest-pellet` | The controller to test. |
 | `--runs N` | `10`, or the set size | Number of runs. With a maze set, the default is one run per maze; more runs cycle through the set. |
@@ -191,7 +212,8 @@ results/nearest-pellet_open-lattice/
 
 ## `replay`
 
-Plays back saved runs. A replay only reads the files; nothing is run again.
+Plays back saved runs, ghosts included. A replay only reads the files; nothing is run again. Result files from
+before ghosts (format 3) are rejected: run them again.
 
 ```powershell
 python -m pacman_otm replay run.json                                # one result (also looked up in results/)
@@ -215,6 +237,7 @@ python -m pacman_otm replay nearest-pellet_open-lattice --fps 20    # bare names
 | PageUp or `[` | Previous run (experiments). |
 | A | Auto-advance on/off: go on to the next run when one ends (on by default). |
 | T / P | Show / hide the controller's target and planned path. |
+| G | Show / hide every ghost's path and target. |
 | Esc | Quit. |
 
 For experiments, the HUD shows `RUN 3/20` and the window title shows which run folder is playing.
@@ -314,12 +337,16 @@ A layout is a text file with one character per tile. All rows must be the same l
 | `P` | Pac-Man's start: a corridor without a pellet. Exactly one is required. |
 | `_` | void: outside the maze, drawn as background |
 | `H`, `-` | ghost house and ghost gate (decorative only) |
+| `G` | ghost spawn: a corridor without a pellet where a ghost starts |
+| `g` | ghost spawn with a pellet |
+
+Ghost *i* starts on the *i*-th spawn, reading row by row.
 
 The usual way to get a layout: generate a maze you like, save it with `--layout`, then edit it.
 
 1. `python -m pacman_otm mazes save classic-like mine --maze-seed 12 --layout`
 2. Open `src/pacman_otm/mazes/layouts/mine.txt`. Move the `P`, turn `.` into space to remove pellets (or the
-   reverse to add them), or turn `#` into `.` to open a wall.
+   reverse to add them), turn `#` into `.` to open a wall, or mark ghost spawns with `G`.
 3. `python -m pacman_otm mazes check mine` validates it, then `simulate --maze mine --visualize` plays it.
 
 When a layout loads, it is checked for size (5..101), exactly one `P`, and that every pellet can be reached from
@@ -330,7 +357,8 @@ touches the edge), but `mazes check` reports them.
 
 ## `sprites`
 
-`python -m pacman_otm sprites [--scale N]` previews the player and death animations.
+`python -m pacman_otm sprites [--scale N]` previews the player and death animations, and every ghost kind
+looking each way with its spawn sticker.
 
 ---
 

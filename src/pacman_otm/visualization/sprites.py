@@ -4,11 +4,15 @@ Procedural sprites, drawn as base-pixel masks and scaled like the maze.
 Player: a round body with a rounded notch (a U-shaped bite) cut into its front.
 Three shapes: closed (shared by all directions), half and wide open, the last two
 in four directions: 9 movement sprites. Plus an 11-frame death sequence.
+
+Ghost: a dome over a straight body with a scalloped hem. The hem alternates
+between two frames so a ghost never looks static, and the pupils look the way
+it moves. Plus a small dim silhouette, the sticker that marks a spawn tile.
 """
 
 from dataclasses import dataclass
 from enum import IntEnum
-from math import cos, pi, radians, sin  # <-- added radians
+from math import cos, pi, radians, sin
 
 import numpy as np
 import pygame
@@ -144,6 +148,92 @@ def death_masks(size: int) -> list[tuple[np.ndarray, bool]]:
     return frames
 
 
+GHOST_FRAMES = 2
+
+# The hem of the 13 px ghost, per frame: (columns filled in the second-to-last
+# row, columns filled in the last row). The two frames put the gaps in opposite places.
+_GHOST_HEMS = (
+    (frozenset(range(13)) - {3, 9}, frozenset({0, 1, 5, 6, 7, 11, 12})),
+    (frozenset(range(13)) - {0, 6, 12}, frozenset({2, 3, 4, 8, 9, 10})),
+)
+
+# Top-left corners of the 4x4 eye whites and where the 2x2 pupil sits inside them.
+_EYE_CORNERS = ((3, 2), (3, 7))
+_PUPIL_OFFSETS: dict[Action | None, tuple[int, int]] = {
+    Action.LEFT: (1, 0),
+    Action.RIGHT: (1, 2),
+    Action.UP: (0, 1),
+    Action.DOWN: (2, 1),
+    None: (1, 1),
+}
+
+
+def ghost_body_mask(frame: int, size: int = 13) -> np.ndarray:
+    """Dome, straight body and the hem of `frame`. Drawn for a 13 px sprite."""
+
+    if size != 13:
+        raise ValueError("The ghost is drawn for 13 px sprites.")
+
+    y, x = _grid(size)
+    centre = (size - 1) / 2
+    dome = ((y - centre) ** 2 + (x - centre) ** 2 <= (centre + 0.3) ** 2) & (y <= centre)
+    body = (y > centre) & (y < size - 2)
+    mask = dome | body
+
+    second_last, last = _GHOST_HEMS[frame % GHOST_FRAMES]
+
+    for col in second_last:
+        mask[size - 2, col] = True
+
+    for col in last:
+        mask[size - 1, col] = True
+
+    return mask
+
+
+def ghost_eye_masks(facing: Action | None, size: int = 13) -> tuple[np.ndarray, np.ndarray]:
+    """(eye whites, pupils): 4x4 whites with trimmed corners, 2x2 pupils toward `facing`."""
+
+    whites = np.zeros((size, size), dtype=bool)
+    pupils = np.zeros((size, size), dtype=bool)
+    pupil_row, pupil_col = _PUPIL_OFFSETS[facing]
+
+    for row, col in _EYE_CORNERS:
+        whites[row:row + 4, col:col + 4] = True
+
+        for corner_row, corner_col in ((row, col), (row, col + 3), (row + 3, col), (row + 3, col + 3)):
+            whites[corner_row, corner_col] = False
+
+        pupils[row + pupil_row:row + pupil_row + 2, col + pupil_col:col + pupil_col + 2] = True
+
+    return whites & ~pupils, pupils
+
+
+def sticker_mask(size: int) -> np.ndarray:
+    """A tiny filled ghost: a rounded top, a body and a notched hem (feet symmetric for size 6)."""
+
+    y, x = _grid(size)
+    centre = (size - 1) / 2
+    top = ((y - centre) ** 2 + (x - centre) ** 2 <= (centre + 0.4) ** 2) & (y <= centre)
+    mask = top | ((y > centre) & (y < size - 1))
+    mask[size - 1, [col for col in range(size) if col % 3 != 1]] = True
+    return mask
+
+
+def _layers(layers: list[tuple[np.ndarray, Color]], scale: int) -> pygame.Surface:
+    """One surface from several single-colour masks, later masks on top."""
+
+    height, width = layers[0][0].shape
+    surface = pygame.Surface((width, height), pygame.SRCALPHA)
+    surface.fill((0, 0, 0, 0))
+
+    for mask, color in layers:
+        for y, x in zip(*np.nonzero(mask)):
+            surface.set_at((int(x), int(y)), (*color, 255))
+
+    return pygame.transform.scale_by(surface, scale)
+
+
 def _surface(mask: np.ndarray, color: Color, scale: int) -> pygame.Surface:
     height, width = mask.shape
     surface = pygame.Surface((width, height), pygame.SRCALPHA)
@@ -187,6 +277,38 @@ class SpriteSet:
             for mask, is_spark in death_masks(size)
         ]
 
+        # (kind, frame, facing) -> sprite, and kind or None (neutral) -> sticker; built on first use.
+        self._ghosts: dict[tuple[str, int, Action | None], pygame.Surface] = {}
+        self._stickers: dict[str | None, pygame.Surface] = {}
+
     def player(self, mouth: Mouth, facing: Action) -> pygame.Surface:
         key = SpriteKey(mouth, None if mouth == Mouth.CLOSED else facing)
         return self.movement[key]
+
+    def ghost(self, kind: str, frame: int, facing: Action | None) -> pygame.Surface:
+        key = (kind, frame % GHOST_FRAMES, facing)
+
+        if key not in self._ghosts:
+            whites, pupils = ghost_eye_masks(facing, self.theme.sprite)
+            body = ghost_body_mask(key[1], self.theme.sprite) & ~whites & ~pupils
+            self._ghosts[key] = _layers(
+                [
+                    (body, self.theme.ghost_body[kind]),
+                    (whites, self.theme.ghost_eye),
+                    (pupils, self.theme.ghost_pupil),
+                ],
+                self.scale,
+            )
+
+        return self._ghosts[key]
+
+    def sticker(self, kind: str | None) -> pygame.Surface:
+        """The spawn marker, in the colour of the ghost `kind` (None: neutral)."""
+
+        if kind not in self._stickers:
+            color = self.theme.ghost_body[kind] if kind is not None else self.theme.sticker_neutral
+            surface = _surface(sticker_mask(self.theme.sticker), color, self.scale)
+            surface.set_alpha(self.theme.sticker_alpha)
+            self._stickers[kind] = surface
+
+        return self._stickers[kind]

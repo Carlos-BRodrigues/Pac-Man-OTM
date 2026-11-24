@@ -1,5 +1,5 @@
 from time import perf_counter
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 from pacman_otm.controllers.controller import Controller, ControllerAborted
 
@@ -17,12 +17,28 @@ def run_simulation(
     controller: Controller,
     max_steps: int = DEFAULT_MAX_STEPS,
     on_frame: Callable[[SimulationFrame], bool | None] | None = None,
+    ghosts: Sequence[Controller] = (),
 ) -> SimulationResult:
+    """
+    Run until the engine ends the run. Each step, Pac-Man's controller and then
+    every ghost decide on the same state, so all of them move at once. Ghost i
+    controls engine.state.ghosts[i]. controller_time_seconds counts Pac-Man's
+    thinking only; ghosts count in the elapsed time.
+    """
+
+    if len(ghosts) != len(engine.state.ghosts):
+        raise ValueError(
+            f"{len(ghosts)} ghost controller(s) for {len(engine.state.ghosts)} ghost(s) in the engine."
+        )
 
     controller.reset()
 
     statuses = []
+    ghost_statuses = []
     controller.clear_status()
+
+    for ghost in ghosts:
+        ghost.reset()
 
     start_time = perf_counter()
     controller_time = 0.0
@@ -52,7 +68,11 @@ def run_simulation(
         status = controller.get_status()
         statuses.append(status)
 
-        engine.step(action)
+        ghost_actions = [ghost.select_action(engine.state) for ghost in ghosts]
+        ghost_status = tuple(ghost.get_status() for ghost in ghosts)
+        ghost_statuses.append(ghost_status)
+
+        engine.step(action, ghost_actions)
 
         if on_frame is not None:
             should_continue = on_frame(
@@ -60,6 +80,7 @@ def run_simulation(
                     state=engine.state.copy(),
                     action=action,
                     status=status,
+                    ghost_statuses=ghost_status,
                 )
             )
 
@@ -79,4 +100,6 @@ def run_simulation(
         metrics,
         statuses=statuses,
         controller=controller.describe(),
+        ghost_statuses=ghost_statuses,
+        ghosts=[ghost.describe() for ghost in ghosts],
     )

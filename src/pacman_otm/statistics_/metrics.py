@@ -13,6 +13,8 @@ class SimulationMetrics:
     completion_rate: float
     completed: bool
     termination_reason: str | None
+    # Ghosts in the run; a run they end has termination_reason "caught".
+    ghosts: int = 0
 
     elapsed_time_seconds: float | None = None
     controller_time_seconds: float | None = None
@@ -41,6 +43,7 @@ class SimulationMetrics:
             completion_rate=completion_rate,
             completed=engine.state.termination_reason == "completed",
             termination_reason=engine.state.termination_reason,
+            ghosts=len(engine.state.ghosts),
             elapsed_time_seconds=elapsed_time_seconds,
             controller_time_seconds=controller_time_seconds,
         )

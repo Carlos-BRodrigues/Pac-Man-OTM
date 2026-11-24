@@ -6,7 +6,12 @@ import pygame
 
 from pacman_otm.mazes.maze import Maze
 from pacman_otm.simulation.frame import SimulationFrame
-from pacman_otm.visualization.animation import INITIAL_POSE, PlayerPose, move_direction
+from pacman_otm.visualization.animation import (
+    INITIAL_POSE,
+    PlayerPose,
+    ghost_frame_at,
+    move_direction,
+)
 from pacman_otm.visualization.maze_art import render_maze
 from pacman_otm.visualization.sprites import SpriteSet
 from pacman_otm.visualization.theme import DEFAULT_THEME, Theme
@@ -17,8 +22,12 @@ Position = tuple[int, int]
 class PygameRenderer:
     """
     Draws SimulationFrames on a pixel grid: 8x8 base-pixel tiles scaled up by a
-    whole number. The maze background is rendered once; each frame adds pellets,
-    overlays and the player sprite. Draws only; no game rules.
+    whole number. The maze background is rendered once; each frame adds the
+    ghost spawn stickers, pellets, overlays, the player and the ghosts (always on
+    top). Draws only; no game rules.
+
+    Overlays: T and P toggle Pac-Man's target and path, G every ghost's path and
+    target (drawn in the ghost's overlay colour).
 
     With an explicit scale the window shows those pixels exactly. By default the
     window fills the same share of the screen for every maze (whichever of width
@@ -39,6 +48,7 @@ class PygameRenderer:
         theme: Theme = DEFAULT_THEME,
         show_target: bool = True,
         show_planned_path: bool = True,
+        show_ghost_overlays: bool = True,
     ) -> None:
 
         pygame.init()
@@ -83,6 +93,7 @@ class PygameRenderer:
         # Overlay settings
         self.show_target = show_target
         self.show_planned_path = show_planned_path
+        self.show_ghost_overlays = show_ghost_overlays
 
         # Optional text in the middle of the HUD, e.g. "RUN 3/20" in an experiment replay.
         self.hud_label: str | None = None
@@ -117,16 +128,21 @@ class PygameRenderer:
         previous_frame: SimulationFrame | None = None,
         progress: float = 1.0,
         message: str | None = None,
+        ghost_frame: int | None = None,
     ) -> None:
         """
-        Draw a frame. With previous_frame and progress < 1, the player is drawn
-        part-way between the two positions (display only).
+        Draw a frame. With previous_frame and progress < 1, the player and the
+        ghosts are drawn part-way between the two positions (display only).
+        ghost_frame picks the ghosts' hem; by default it follows the clock, so
+        ghosts keep moving while the picture holds still.
         """
 
         self._draw_scene(frame, previous_frame, progress)
 
         position = self._player_position(frame, previous_frame, progress)
         self._blit_sprite(self.sprites.player(pose.mouth, pose.facing), position)
+
+        self._draw_ghosts(frame, previous_frame, progress, ghost_frame)
 
         self._finish(frame, message)
 
@@ -136,6 +152,7 @@ class PygameRenderer:
         death_index: int,
         message: str | None = None,
     ) -> None:
+        # The ghosts leave the picture while Pac-Man dies, as in the arcade.
         self._draw_scene(frame, None, 1.0)
 
         position = self._tile_pixel(frame.state.pacman_position)
@@ -151,6 +168,7 @@ class PygameRenderer:
     ) -> None:
         self.screen.fill(self.theme.background)
         self.screen.blit(self.background, (self.maze_x, self.hud_px))
+        self._draw_stickers([ghost.kind for ghost in frame.state.ghosts])
 
         # The pellet on the destination tile is eaten halfway through the move.
         if previous_frame is not None and progress < 0.5:
@@ -161,6 +179,7 @@ class PygameRenderer:
         self._draw_pellets(pellets)
         self._draw_planned_path(frame)
         self._draw_target(frame)
+        self._draw_ghost_overlays(frame)
 
     def _finish(self, frame: SimulationFrame, message: str | None) -> None:
         self._draw_hud(frame)
@@ -185,12 +204,19 @@ class PygameRenderer:
         previous_frame: SimulationFrame | None,
         progress: float,
     ) -> tuple[float, float]:
-        current = frame.state.pacman_position
+        previous = previous_frame.state.pacman_position if previous_frame is not None else None
+        return self._glide(previous, frame.state.pacman_position, progress)
 
-        if previous_frame is None or progress >= 1.0:
+    def _glide(
+        self,
+        previous: Position | None,
+        current: Position,
+        progress: float,
+    ) -> tuple[float, float]:
+        """Screen position part-way from previous to current (a sprite's tile corner)."""
+
+        if previous is None or progress >= 1.0:
             return self._tile_pixel(current)
-
-        previous = previous_frame.state.pacman_position
 
         # Only a one-tile move is interpolated; anything else is drawn in place.
         if move_direction(previous, current) is None:
@@ -215,6 +241,66 @@ class PygameRenderer:
                 self.theme.pellet_color,
                 pygame.Rect(round(x) + inset, round(y) + inset, size, size),
             )
+
+    def _draw_stickers(self, kinds: list[str]) -> None:
+        """A dim ghost on every spawn tile, coloured by the ghost that starts there."""
+
+        offset = (self.theme.tile - self.theme.sticker) // 2 * self.scale
+
+        for index, spawn in enumerate(self.maze.ghost_spawns):
+            sticker = self.sprites.sticker(kinds[index] if index < len(kinds) else None)
+            x, y = self._tile_pixel(spawn)
+            self.screen.blit(sticker, (round(x) + offset, round(y) + offset))
+
+    def _draw_ghosts(
+        self,
+        frame: SimulationFrame,
+        previous_frame: SimulationFrame | None,
+        progress: float,
+        ghost_frame: int | None,
+    ) -> None:
+        if ghost_frame is None:
+            ghost_frame = ghost_frame_at(pygame.time.get_ticks())
+
+        previous_ghosts = previous_frame.state.ghosts if previous_frame is not None else ()
+
+        for index, ghost in enumerate(frame.state.ghosts):
+            previous = previous_ghosts[index].position if index < len(previous_ghosts) else None
+            sprite = self.sprites.ghost(ghost.kind, ghost_frame, ghost.direction)
+            self._blit_sprite(sprite, self._glide(previous, ghost.position, progress))
+
+    def _draw_ghost_overlays(self, frame: SimulationFrame) -> None:
+        if not self.show_ghost_overlays:
+            return
+
+        for ghost, status in zip(frame.state.ghosts, frame.ghost_statuses):
+            if status is None:
+                continue
+
+            color = self.theme.ghost_overlay[ghost.kind]
+            self._draw_path_line(status.planned_path, color)
+
+            if status.target is not None:
+                # Smaller than Pac-Man's ring, so both show on a shared tile.
+                pygame.draw.circle(
+                    self.screen,
+                    color,
+                    self._tile_center(status.target),
+                    self.tile_px * 5 // 8,
+                    width=self.scale,
+                )
+
+    def _draw_path_line(self, path: tuple[Position, ...], color) -> None:
+        if len(path) < 2:
+            return
+
+        pygame.draw.lines(
+            self.screen,
+            color,
+            False,
+            [self._tile_center(position) for position in path],
+            width=self.scale,
+        )
 
     def _draw_message(self, message: str) -> None:
         """Draw a banner (e.g. "READY!") centred over the maze."""
@@ -259,20 +345,7 @@ class PygameRenderer:
             return
 
         # Keep only the path ahead of Pac-Man.
-        remaining_path = path[path_index:]
-
-        if len(remaining_path) < 2:
-            return
-
-        points = [self._tile_center(position) for position in remaining_path]
-
-        pygame.draw.lines(
-            self.screen,
-            self.theme.path,
-            False,
-            points,
-            width=self.scale,
-        )
+        self._draw_path_line(path[path_index:], self.theme.path)
 
     def _draw_hud(self, frame: SimulationFrame) -> None:
         step_text = self.font.render(
@@ -288,7 +361,8 @@ class PygameRenderer:
 
         overlay_text = self.font.render(
             f"T:{'on' if self.show_target else 'off'}  "
-            f"P:{'on' if self.show_planned_path else 'off'}",
+            f"P:{'on' if self.show_planned_path else 'off'}"
+            + (f"  G:{'on' if self.show_ghost_overlays else 'off'}" if self.maze.ghost_spawns else ""),
             True,
             self.theme.text,
         )
@@ -298,10 +372,11 @@ class PygameRenderer:
         )
 
     def draw_preview(self, highlights: Iterable[Position], status: str) -> None:
-        """A maze without a run: pellets, Pac-Man at the start, highlighted tiles and a status line."""
+        """A maze without a run: spawn stickers, pellets, Pac-Man at the start, highlighted tiles and a status line."""
 
         self.screen.fill(self.theme.background)
         self.screen.blit(self.background, (self.maze_x, self.hud_px))
+        self._draw_stickers([])
         self._draw_pellets(set(self.maze.initial_pellets))
 
         tint = pygame.Surface((self.tile_px, self.tile_px), pygame.SRCALPHA)
@@ -336,6 +411,9 @@ class PygameRenderer:
 
             elif event.key == pygame.K_p:
                 self.show_planned_path = not self.show_planned_path
+
+            elif event.key == pygame.K_g:
+                self.show_ghost_overlays = not self.show_ghost_overlays
 
     def process_events(self) -> bool:
         for event in pygame.event.get():
