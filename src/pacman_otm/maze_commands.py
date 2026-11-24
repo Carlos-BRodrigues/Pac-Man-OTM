@@ -22,6 +22,7 @@ from pacman_otm.mazes.origin import MazeOrigin
 from pacman_otm.mazes.registry import (
     DEFAULT_MAZE,
     SAVED_DIR,
+    MazeGenerationFailed,
     MazeSource,
     MazeSpecError,
     create_maze_registry,
@@ -83,26 +84,40 @@ def random_maze_seed() -> int:
     return secrets.randbelow(2**32)
 
 
-def choose_maze_seed(source: MazeSource, seed: int | None) -> int:
-    """The given seed, or for a recipe without one, a random seed that is announced."""
-
-    if seed is not None:
-        return seed
-
-    if not source.generated:
-        return 0
-
-    seed = random_maze_seed()
-    print(f"Maze seed: {seed}  (repeat this maze with --maze-seed {seed})")
-    return seed
+# Random seeds tried before giving up, when a recipe fails for some seeds.
+RANDOM_SEED_TRIES = 10
 
 
 def load_maze(spec: str, args: argparse.Namespace) -> tuple[MazeSource, Maze, int]:
-    """The maze of --maze/--maze-seed/--maze-set, and the seed it was built from."""
-
+    """
+    The maze of --maze/--maze-seed/--maze-set, and the seed it was built from.
+    A recipe without --maze-seed gets a random seed, which is announced. Strict
+    recipes fail for some seeds; a random seed that fails is replaced by another
+    (an explicit --maze-seed is never replaced).
+    """
     source = resolve_maze_source(spec, args.maze_set)
-    seed = choose_maze_seed(source, args.maze_seed)
-    return source, source.build(seed), seed
+
+    if args.maze_seed is not None or not source.generated:
+        seed = args.maze_seed if args.maze_seed is not None else 0
+        return source, source.build(seed), seed
+
+    for _ in range(RANDOM_SEED_TRIES):
+        seed = random_maze_seed()
+
+        try:
+            maze = source.build(seed)
+        except MazeGenerationFailed as error:
+            print(f"Maze seed {seed} failed ({error.reason}); trying another seed.")
+            failure = error
+            continue
+
+        print(f"Maze seed: {seed}  (repeat this maze with --maze-seed {seed})")
+        return source, maze, seed
+
+    raise MazeSpecError(
+        f"'{source.name}' failed for {RANDOM_SEED_TRIES} random seeds in a row; the last: {failure.reason} "
+        f"The recipe's rules are probably too strict for its size or shape."
+    )
 
 
 def maze_label(source: MazeSource, maze: Maze, seed: int) -> str:
@@ -308,9 +323,20 @@ def run_mazes_generate(args: argparse.Namespace) -> None:
 
     first = args.seed if args.seed is not None else random_maze_seed()
     seeds = range(first, first + args.count)
+    failed = []
 
     for seed in seeds:
-        maze = source.build(seed)
+        try:
+            maze = source.build(seed)
+        except MazeGenerationFailed as error:
+            if args.count == 1:
+                raise
+
+            # One strict seed shouldn't end a gallery: report it and go on.
+            print(f"{source.name} seed {seed}: failed: {error.reason}")
+            failed.append(seed)
+            continue
+
         metrics = analyze(maze)
 
         print(
@@ -326,6 +352,15 @@ def run_mazes_generate(args: argparse.Namespace) -> None:
         if args.save is not None:
             target = args.save if args.count == 1 else _numbered(args.save, seed)
             save_named_maze(maze, target, as_layout=args.layout, force=args.force)
+
+    if failed:
+        listed = ", ".join(str(seed) for seed in failed)
+        summary = f"{len(failed)} of {args.count} seeds failed ({listed})."
+
+        if len(failed) == args.count:
+            raise MazeSpecError(f"{summary} The recipe's rules are probably too strict for its size or shape.")
+
+        print(summary)
 
 
 NAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")

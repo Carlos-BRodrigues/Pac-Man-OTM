@@ -249,7 +249,7 @@ def add_scale_argument(parser: argparse.ArgumentParser) -> None:
         "--scale",
         type=positive_int,
         default=None,
-        help="Pixel scale of the 8x8 tiles (whole number). Default: the largest that fits the screen.",
+        help="Pixel scale of the 8x8 tiles (whole number). Default: the window fills 85%% of the screen's height or width, at any maze size.",
     )
 
 
@@ -447,7 +447,8 @@ def main() -> None:
     try:
         args.func(args)
     except (MazeSpecError, ConfigError, GenerationError) as error:
-        parser.error(str(error))
+        # Not a mistake in the arguments' syntax, so no usage text.
+        parser.exit(2, f"{parser.prog}: error: {error}\n")
 
 
 if __name__ == "__main__":

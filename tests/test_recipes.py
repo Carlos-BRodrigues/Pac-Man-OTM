@@ -335,3 +335,31 @@ def test_a_recipe_without_a_seed_gets_a_random_announced_one(monkeypatch, capsys
     args.maze_seed = None
     assert maze_commands.load_maze("small", args)[2] == 0
     assert capsys.readouterr().out == ""
+
+
+def test_a_failing_random_seed_is_replaced(monkeypatch, capsys) -> None:
+    import argparse
+
+    from pacman_otm import maze_commands
+    from pacman_otm.mazes.registry import MazeGenerationFailed, MazeSource
+
+    seeds = iter([1, 2])
+    monkeypatch.setattr(maze_commands, "random_maze_seed", lambda: next(seeds))
+    original = MazeSource.build
+
+    def build(self, seed=0):
+        if seed == 1:
+            raise MazeGenerationFailed(self.name, seed, "too strict")
+        return original(self, seed)
+
+    monkeypatch.setattr(MazeSource, "build", build)
+    args = argparse.Namespace(maze_set=[], maze_seed=None)
+
+    assert maze_commands.load_maze("open-lattice", args)[2] == 2
+    output = capsys.readouterr().out
+    assert "Maze seed 1 failed (too strict)" in output and "--maze-seed 2" in output
+
+    # A seed the user chose is never replaced.
+    args.maze_seed = 1
+    with pytest.raises(MazeGenerationFailed, match="with seed 1: too strict"):
+        maze_commands.load_maze("open-lattice", args)

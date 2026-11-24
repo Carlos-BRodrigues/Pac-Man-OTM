@@ -42,7 +42,8 @@ Picks which maze a recipe makes. The same recipe and seed always give the same m
   Maze seed: 2937922887  (repeat this maze with --maze-seed 2937922887)
   ```
 
-  The seed is also recorded in the result file.
+  The seed is also recorded in the result file. A strict recipe may fail for some seeds; a random seed that fails
+  is replaced by another (up to 10 tries, each failure printed). A seed you give is used as is, or fails.
 - In `experiment`, leaving it out means **a new maze per run**. Giving it means one maze for every run (see
   [experiment](#experiment)).
 - Layouts and saved mazes ignore it.
@@ -71,6 +72,8 @@ Runs one controller on one maze.
 
 ```powershell
 python -m pacman_otm simulate --maze twisty --visualize                 # a random twisty maze
+python -m pacman_otm simulate --maze organic --visualize                # a random grown, organic maze
+python -m pacman_otm simulate --maze grotto --visualize                 # a mirrored, oval cave
 python -m pacman_otm simulate --maze open-lattice --maze-seed 7 --save  # save the result
 python -m pacman_otm simulate --maze small --controller random-walk --seed 7 --output run.json --show-history
 ```
@@ -82,7 +85,7 @@ python -m pacman_otm simulate --maze small --controller random-walk --seed 7 --o
 | `--seed N` | `42` | Seed for stochastic controllers such as `random-walk`. |
 | `--max-steps N` | `1000` | Stop after this many steps. |
 | `--visualize` | off | Show the run live. |
-| `--scale N` | fits the screen | Whole-number pixel scale of the window. |
+| `--scale N` | fits the screen | Whole-number pixel scale: each 8×8 tile is drawn N times larger, pixel-exact. Without it the window fills 85% of the screen's height or width (whichever the maze's shape reaches first), so every maze gets a window of about the same size. |
 | `--save` | off | Save the result to `results/<controller>_<maze>_<timestamp>.json`. A recipe maze is named `<recipe>-seed<N>`. |
 | `--output NAME` | none | Save to this file instead; implies `--save`. A bare name goes into `results/`. |
 | `--show-history` | off | Print every recorded step. |
@@ -250,7 +253,7 @@ python -m pacman_otm mazes generate classic-like --seed 7 --save demo
 | Option | Default | Meaning |
 |---|---|---|
 | `--seed N` | random | The first seed; `--count K` makes seeds N … N+K−1. |
-| `--count K` | `1` | How many mazes. |
+| `--count K` | `1` | How many mazes. A seed that fails is reported and skipped; the command fails only if all do. |
 | `--quiet` | off | Metrics only, no maze text. |
 | `--save NAME\|PATH` | none | Save each maze, as with `mazes save`. With `--count` above 1, the seed is added: `demo-7`, `demo-8`, … |
 | `--layout` | off | Save as an editable `.txt` layout. |

@@ -1,0 +1,59 @@
+name = "grotto"
+description = "A mirrored cave: an oval grown outwards from its middle, with wandering corridors and thick walls."
+
+# In the spirit of organic_special, on a curved outline instead of a rectangle. A blob
+# outline (kind = "blob", fill = 0.75, mirror = "horizontal") also works, but its narrow
+# lobes make about 1 seed in 15 fail; the ellipse built 30 of 30.
+
+[size]
+height = [38, 50]
+width = [44, 60]
+
+[shape]
+kind = "ellipse"         # symmetric both ways, so the corridors can be mirrored
+
+[topography]
+generator = "grow"
+start = "center"         # grow outwards from a loop in the middle
+turn_cost = 1.0          # paths turn only where they must, but jog freely
+noise = 8.0              # strong wandering
+depth_bonus = 20.0       # paths swing deep into empty wall: big round sweeps
+extra_paths = 4          # a few more loops once every rule holds
+search_radius = 24
+mirror = "horizontal"
+
+[[rules]]
+rule = "max_dead_ends"
+count = 0
+
+[[rules]]
+rule = "max_block"
+tile = "corridor"
+size = 2
+
+[[rules]]
+rule = "no_diagonal_contact"
+
+[[rules]]
+rule = "min_wall_thickness"
+size = 2
+
+[[rules]]
+rule = "max_block"
+tile = "wall"
+size = 8
+
+[[rules]]
+rule = "max_straight_run"
+length = 12
+
+[[rules]]
+rule = "max_corridor_length"
+length = 16
+
+[[rules]]
+rule = "mirror_symmetric"
+axis = "horizontal"
+
+[content.start]
+placer = "center"

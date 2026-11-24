@@ -1,5 +1,7 @@
 from collections.abc import Iterable
 
+import math
+
 import pygame
 
 from pacman_otm.mazes.maze import Maze
@@ -17,11 +19,17 @@ class PygameRenderer:
     Draws SimulationFrames on a pixel grid: 8x8 base-pixel tiles scaled up by a
     whole number. The maze background is rendered once; each frame adds pellets,
     overlays and the player sprite. Draws only; no game rules.
+
+    With an explicit scale the window shows those pixels exactly. By default the
+    window fills the same share of the screen for every maze (whichever of width
+    or height runs out first), so similar mazes get similar windows: frames are
+    drawn at the next whole scale up and smoothly scaled down to the window.
+    A whole scale alone jumps (a 52-row maze gets twice the window of a 61-row one).
     """
 
     MAX_SCALE = 6
-    # Share of the desktop the window may use, leaving room for the title bar and taskbar.
-    SCREEN_FRACTION = 0.9
+    # Share of the desktop the window uses, leaving room for the title bar and taskbar.
+    SCREEN_FRACTION = 0.85
     MIN_WINDOW_WIDTH = 200
 
     def __init__(
@@ -38,8 +46,12 @@ class PygameRenderer:
         self.maze = maze
         self.theme = theme
 
-        # None: the largest whole-number scale that keeps the window on screen.
-        self.scale = scale if scale is not None else self._fit_scale()
+        # None: fit the screen (see the class docstring); the window is display_factor
+        # times the size of the frames drawn at self.scale.
+        if scale is None:
+            self.scale, display_factor = self._fit_scale()
+        else:
+            self.scale, display_factor = scale, 1.0
 
         if self.scale < 1:
             raise ValueError("The scale must be at least 1.")
@@ -52,7 +64,12 @@ class PygameRenderer:
         # Narrow mazes are centred in a window kept wide enough for the HUD.
         self.maze_x = (self.width - maze.width * self.tile_px) // 2
 
-        self.screen = pygame.display.set_mode((self.width, self.height))
+        window_size = (round(self.width * display_factor), round(self.height * display_factor))
+        self.window = pygame.display.set_mode(window_size)
+        # Everything is drawn on self.screen; _present shows it in the window.
+        self.screen = self.window if window_size == (self.width, self.height) else pygame.Surface(
+            (self.width, self.height)
+        )
 
         self.caption = f"Pac-Man OTM | {maze.name}"
         pygame.display.set_caption(self.caption)
@@ -72,19 +89,24 @@ class PygameRenderer:
 
         self.is_open = True
 
-    def _fit_scale(self) -> int:
+    def _fit_scale(self) -> tuple[int, float]:
+        """The whole scale to draw at, and the factor from it to the window size."""
+
         desktop_sizes = pygame.display.get_desktop_sizes()
         screen_width, screen_height = desktop_sizes[0] if desktop_sizes else (1280, 800)
 
         base_width = self.maze.width * self.theme.tile
         base_height = self.maze.height * self.theme.tile + self.theme.hud_height
 
-        fit = int(min(
-            screen_width * self.SCREEN_FRACTION // base_width,
-            screen_height * self.SCREEN_FRACTION // base_height,
-        ))
-
-        return max(1, min(self.MAX_SCALE, fit))
+        # The exact scale that fills the screen share; small mazes stop at MAX_SCALE.
+        fit = min(
+            screen_width * self.SCREEN_FRACTION / base_width,
+            screen_height * self.SCREEN_FRACTION / base_height,
+            self.MAX_SCALE,
+        )
+        # Draw at the next whole scale up, so the window only ever shrinks the frames.
+        scale = max(1, math.ceil(fit - 1e-9))
+        return scale, fit / scale
 
     # Drawing
 
@@ -146,7 +168,7 @@ class PygameRenderer:
         if message is not None:
             self._draw_message(message)
 
-        pygame.display.flip()
+        self._present()
 
     def _tile_pixel(self, position: Position | tuple[float, float]) -> tuple[float, float]:
         """Screen position of a tile's top-left corner (accepts fractional tiles)."""
@@ -293,6 +315,12 @@ class PygameRenderer:
 
         text = self.font.render(status, True, self.theme.text)
         self.screen.blit(text, text.get_rect(midleft=(self.scale * 2, self.hud_px // 2)))
+
+        self._present()
+
+    def _present(self) -> None:
+        if self.screen is not self.window:
+            pygame.transform.smoothscale(self.screen, self.window.get_size(), self.window)
 
         pygame.display.flip()
 

@@ -1,0 +1,45 @@
+name = "big-classic-like"
+description = "Left-right symmetric, one-tile corridors, walls at least two thick, long halls, no dead ends."
+
+[size]
+height = [50,60]
+width = [46,56]
+
+[topography]
+generator = "lattice"
+spacing = [3, 5]          # walls 2..4 thick, as in the arcade maze
+extra_loops = 0.15
+mirror = "horizontal"
+straightness = 0.5
+
+[[rules]]
+rule = "max_dead_ends"
+count = 0
+
+[[rules]]
+rule = "max_block"
+tile = "corridor"
+size = 2
+
+[[rules]]
+rule = "max_block"
+tile = "wall"
+size = 5
+
+[[rules]]
+rule = "no_diagonal_contact"
+
+[[rules]]
+rule = "min_wall_thickness"   # no one-tile walls between corridors (the border may be one tile)
+size = 2
+
+[[rules]]
+rule = "max_corridor_length"
+length = 14
+
+[[rules]]
+rule = "mirror_symmetric"
+axis = "horizontal"
+
+[content.start]
+placer = "center"

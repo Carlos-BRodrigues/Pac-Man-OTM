@@ -9,7 +9,7 @@ defaults included, so a result says exactly how its maze was made.
 """
 
 import tomllib
-from dataclasses import dataclass, fields
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Any, get_type_hints
 
@@ -87,10 +87,8 @@ class MazeRecipe:
         return f"{text(*self.heights)}x{text(*self.widths)}"
 
     def to_dict(self) -> dict[str, Any]:
-        topography = {
-            field.name: getattr(self.topography, field.name)
-            for field in fields(self.topography)
-        }
+        # asdict also turns nested parameter dataclasses (sculpt's lattice) into tables.
+        topography = asdict(self.topography)
 
         return deep_thaw(
             {

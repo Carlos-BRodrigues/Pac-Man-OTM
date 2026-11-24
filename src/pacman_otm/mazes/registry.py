@@ -58,6 +58,15 @@ class MazeSpecError(ValueError):
     """A --maze value that names no maze, or a maze file that cannot be used."""
 
 
+class MazeGenerationFailed(MazeSpecError):
+    """A recipe that cannot make a maze from one particular seed (another seed may work)."""
+
+    def __init__(self, name: str, seed: int, reason: str) -> None:
+        super().__init__(f"Cannot generate '{name}' with seed {seed}: {reason}")
+        self.seed = seed
+        self.reason = reason
+
+
 @dataclass(frozen=True)
 class MazeSource:
     """Where a maze comes from. A recipe needs a seed to become a maze; the others ignore it."""
@@ -92,7 +101,7 @@ class MazeSource:
         except MazeSpecError:
             raise
         except GenerationError as error:
-            raise MazeSpecError(f"Cannot generate '{self.name}' with seed {seed}: {error}") from error
+            raise MazeGenerationFailed(self.name, seed, str(error)) from error
         except (ValueError, OSError) as error:
             raise MazeSpecError(f"Invalid {self.kind} file '{self.path}': {error}") from error
 

@@ -403,3 +403,32 @@ def test_min_wall_thickness_incremental_check_matches_full_check(size: int) -> N
             tiles[position] = previous
 
     assert outcomes == {True, False}
+
+
+@pytest.mark.parametrize(
+    "rule",
+    [MaxStraightRun(length=5), MaxCorridorLength(length=8), MirrorSymmetric(axis="horizontal")],
+)
+def test_structure_rules_incremental_check_matches_full_check(rule) -> None:
+    rng = np.random.default_rng(3)
+    # A lattice with corridors every other line: valid for all three (symmetric, runs <= 3 between junctions).
+    tiles = np.full((11, 11), Tile.WALL, dtype=np.uint8)
+    tiles[1:-1:2, 1:-1] = Tile.CORRIDOR
+    tiles[1:-1, 1:-1:2] = Tile.CORRIDOR
+    assert not rule.violations(tiles)
+
+    outcomes = set()
+
+    for _ in range(2000):
+        position = (int(rng.integers(1, 10)), int(rng.integers(1, 10)))
+        previous = tiles[position]
+        tiles[position] = Tile.WALL if previous == Tile.CORRIDOR else Tile.CORRIDOR
+
+        holds = rule.holds_after_change(tiles, position)
+        assert holds == (not rule.violations(tiles)), (rule.describe(), position)
+        outcomes.add(holds)
+
+        if not holds:
+            tiles[position] = previous
+
+    assert outcomes == {True, False}

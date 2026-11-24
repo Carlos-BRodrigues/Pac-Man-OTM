@@ -1,0 +1,51 @@
+name = "lattice-special"
+description = "A random organic outline with irregular wall islands."
+
+[size]
+height = [50,70]
+width = [55,75]
+
+[shape]
+kind = "blob"
+fill = 0.9
+mirror = "horizontal"
+
+[topography]
+generator = "lattice"
+spacing = [3, 6]
+extra_loops = 0.2
+straightness = 0.2
+node_dropout = 0.25
+mirror = "horizontal"
+
+[[rules]]
+rule = "max_dead_ends"
+count = 0
+
+[[rules]]
+rule = "max_block"
+tile = "corridor"
+size = 2
+
+[[rules]]
+rule = "max_block"
+tile = "wall"
+size = 6
+
+[[rules]]
+rule = "min_wall_thickness"   # no one-tile walls between corridors (the border may be one tile)
+size = 2
+
+[[rules]]
+rule = "max_straight_run"
+length = 10
+
+[[rules]]
+rule = "max_corridor_length"
+length = 12
+
+[[rules]]
+rule = "no_diagonal_contact"
+
+[content.start]
+placer = "center"

@@ -1,7 +1,7 @@
 # Roadmap — Arbitrary and Generated Mazes
 
-Status: steps 0–4 done (commit `32c1c1b`); step 5 (`ea7ea19`), step 6 (`fd6ba16`), step 7 (`ff826d8`),
-step 8 done (uncommitted). Steps 9–10 below are the agreed design for sculpting and ghost features. Revised 2026-11-23; replaces the earlier steps 5–7.
+Status: steps 0–8 done (latest commit `47537e8`); step 9 done as the `grow` generator, step 9.5 (smoothing)
+done (both uncommitted; see "Step 9 as built" and "Step 9.5" below). Step 10 (ghost features) remains. Revised 2026-11-23; replaces the earlier steps 5–7.
 Added 2026-11-22: rule `max_corridor_length(length)` (step 5, done) and lattice params
 `straightness` and `node_dropout` (step 6); details in the implementation plan.
 Read `AGENTS.md` first; every rule there still applies.
@@ -85,6 +85,27 @@ three rules:
 - **Rule `min_wall_thickness(size)`:** no wall thinner than `size` between corridors (border, void and ghost house
   excepted, so `classic` passes size 2). Lattice meets it by construction with `spacing` min ≥ size + corridor_width,
   checked up front. `classic-like` now uses it with `spacing = [3, 5]`, so its mazes differ from before.
+- **Step 9 as built — `grow` instead of tile-flip sculpt (decided 2026-11-23):** a prototype of the planned
+  sculpt (flip single tiles, keep every rule) could not move under arcade rules. With `max_dead_ends = 0` only 29
+  tiles changed in 4000 tries; with `min_wall_thickness(2)` nothing changed, strict or with soft penalties,
+  because one flip can't keep a two-tile wall and a one-tile corridor. Rewiring a finished lattice had no room to
+  dig. What works is constructive: `generation/grow.py` starts from a ring (or centre loop) and digs winding
+  clearance paths, aimed by the rules, with straight bridges for overlong corridors and seeded restarts.
+  The fast local checks written for sculpt (`holds_after_change` for max_straight_run, max_corridor_length,
+  mirror_symmetric) are kept and tested. New starter recipe `organic`. 31×31 takes about 0.2 s; 101×101 5–8 s
+  without run rules, 5–30 s with them.
+- **Step 9.5 — smoothing (2026-11-24):**
+  - `start = "center"` on large rectangles: the start loop was placed where a capped depth map first peaked (near
+    a corner), and with `mirror` it gained a disconnected mirror copy, so generation failed. It is now centred, on
+    the mirror axes when mirroring (8 wide across an axis between two columns).
+  - A* in flat lists, about twice as fast, with identical paths (fingerprints of existing mazes unchanged).
+  - `attempts` default 3 → 6: seeds that built before give the same maze; most seeds that failed now build.
+  - A random maze seed that fails is replaced (up to 10 tries); `mazes generate --count` skips failed seeds;
+    generation errors print without argparse usage text (`MazeGenerationFailed` in the registry).
+- **Step 9.75 — window size and `grotto` (2026-11-24):** the default window fills 85% of the screen's height or
+  width, whichever the maze's shape reaches first: frames are drawn at the next whole scale up and smoothly scaled
+  down (`--scale N` stays pixel-exact). Before, the whole-number scale made similar mazes jump between window
+  sizes. New starter recipe `grotto`: `grow` on an ellipse, centre start, mirrored, high noise and depth bonus.
 - Also in place: `experiments/seeding.py` (`derive_run_seeds`) and `ExperimentRunner(maze_factory=…)`.
 
 ---

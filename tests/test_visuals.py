@@ -206,3 +206,35 @@ def test_auto_scale_fits_the_screen() -> None:
     renderer = PygameRenderer(resolve_maze("classic"))
     assert renderer.scale >= 1
     assert renderer.width == max(renderer.MIN_WINDOW_WIDTH, 28 * THEME.tile * renderer.scale)
+
+
+def test_default_window_size_is_predictable(monkeypatch) -> None:
+    """
+    Mazes of similar size get windows of the same height (or width, for wide
+    mazes), not ones that jump with the whole-number drawing scale.
+    """
+    monkeypatch.setattr(pygame.display, "get_desktop_sizes", lambda: [(1536, 864)])
+    limit = round(864 * PygameRenderer.SCREEN_FRACTION)
+
+    def window(height: int, width: int) -> tuple[int, int]:
+        layout = "\n".join(["#" * width] + ["#" + "." * (width - 2) + "#"] * (height - 2) + ["#" * width])
+        layout = layout.replace(".", "P", 1)
+        renderer = PygameRenderer(parse_layout(layout, name="box"))
+        size = renderer.window.get_size()
+        # Frames drawn at a whole scale reach the window, scaled down.
+        renderer.draw(SimulationFrame(state=SimulationEngine(renderer.maze).get_state(0)))
+        assert len(np.unique(pygame.surfarray.array2d(renderer.window))) > 2
+        renderer.close()
+        return size
+
+    tall = [window(52, 40), window(61, 40), window(101, 101)]
+    assert all(abs(height - limit) <= 1 for _, height in tall)
+
+    wide_width, wide_height = window(25, 80)
+    assert abs(wide_width - round(1536 * PygameRenderer.SCREEN_FRACTION)) <= 1 and wide_height < limit
+
+    # Small mazes stop at the largest scale; an explicit scale is pixel-exact.
+    assert window(7, 7)[0] == 7 * THEME.tile * PygameRenderer.MAX_SCALE
+    renderer = PygameRenderer(resolve_maze("small"), scale=2)
+    assert renderer.screen is renderer.window and renderer.window.get_width() == max(200, 7 * THEME.tile * 2)
+    renderer.close()

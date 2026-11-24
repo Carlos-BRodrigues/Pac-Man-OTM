@@ -70,7 +70,8 @@ A recipe can also live anywhere else and be passed as a path: `--maze path/to/my
 
 - **No `--maze-seed`** on `simulate`, `play`, `mazes show/check/preview`: a random seed is chosen and
   printed (`Maze seed: 2937922887 (repeat this maze with --maze-seed 2937922887)`). The seed is also
-  saved in the result file, so every run can be repeated.
+  saved in the result file, so every run can be repeated. If a strict recipe can't build a maze from that seed,
+  another random seed is tried (up to 10), and the failure is printed. A seed you give is never replaced.
 - **`--maze-seed N`**: exactly that maze.
 - **`experiment`** without `--maze-seed`: every run gets its own maze. Run *i*'s maze seed comes from
   the experiment `--seed` and *i*, so two controllers run with the same `--seed` play the same mazes.
@@ -189,6 +190,15 @@ thick block of wall. It looks the same, because only wall next to corridors is e
 
 ## `[topography]`
 
+There are two generators, chosen with `generator`:
+
+| `generator` | Makes | Good for |
+|---|---|---|
+| `"lattice"` (default) | Corridors along randomly spaced grid lines. | Fast, very configurable; wide corridors; a grid-like, tidy look. |
+| `"grow"` | Winding corridors dug path by path. | Organic, hand-made-looking arcade mazes. |
+
+### The `lattice` generator
+
 The **lattice** generator builds the corridors in five steps:
 
 1. Corridor **lines** (rows and columns) are placed at random spacings.
@@ -199,7 +209,7 @@ The **lattice** generator builds the corridors in five steps:
 
 | Key | Default | Range | Meaning |
 |---|---|---|---|
-| `generator` | `"lattice"` | `lattice` | The corridor generator. A second one (sculpt, for organic mazes) is planned. |
+| `generator` | `"lattice"` | `lattice`, `grow` | The corridor generator. The keys below are the lattice's; `grow` has its own (see [below](#the-grow-generator)). |
 | `spacing` | `[2, 4]` | `min ≥ corridor_width + 1`, `max ≥ min` | Distance from one corridor line to the next parallel one, in tiles, drawn at random from `[min, max]`. The wall between two lines is `spacing − corridor_width` thick. Small spacing gives a dense maze with thin walls; large spacing gives big wall blocks and long segments. |
 | `corridor_width` | `1` | `≥ 1` | Width of each corridor. Use 2 or more for halls. See [Wide corridors](#wide-corridors). |
 | `extra_loops` | `0.1` | 0..1 | Share of the unused segments added after the tree. `0` gives a tree (no loops, many dead ends, unless a rule closes them); `0.3` or more gives a very open maze. |
@@ -207,6 +217,81 @@ The **lattice** generator builds the corridors in five steps:
 | `straightness` | `0.0` | −1..1 | Texture. Above 0, the tree tends to keep going straight, giving long halls. Below 0, it tends to turn at every node, giving twisty corridors. Measured on 31×31 mazes, the mean straight stretch grows from about 4.0 tiles at −1 to 5.5 at +1. |
 | `node_dropout` | `0.0` | 0..<0.5 | Share of nodes removed before the tree: irregular cells, bigger wall islands, fewer corridors. Repairs may bring a removed node back if a rule needs it. |
 | `max_repair_rounds` | `200` | `≥ 1` | Safety limit for the repair loop. You should rarely need to raise it. |
+
+### The `grow` generator
+
+`grow` makes organic, hand-made-looking mazes: winding corridors, walls of the thickness you ask for, and no
+dead ends. It doesn't use grid lines. It starts from a small maze and **digs one winding path at a time**
+through solid wall, each from one corridor to another, until every rule holds.
+
+1. **Start:** a ring corridor just inside the shape (for rectangles), or a small square loop at the shape's
+   deepest point (any shape).
+2. **Dig:** each path is aimed at what still needs work, in this order:
+   1. an overlong corridor (`max_straight_run`, `max_corridor_length`), which gets a junction: a short straight
+      bridge to the corridor next to it, or a new branch;
+   2. a wall block that is too big (`max_block(wall)`);
+   3. any part of the shape that is still far from a corridor, so the maze fills the shape (best effort);
+   4. `min_loops`, `min_junction_share` and `walkable_fraction.min`.
+3. **Shape of a path:** a path is the cheapest route through wall that keeps its distance from other corridors.
+   Wall deep inside a block is cheaper (`depth_bonus`), every tile has a random extra cost (`noise`), and every
+   turn costs extra (`turn_cost`). Each path leaves a corridor straight, at a right angle.
+4. **Check:** every path must keep the rules it touches. If growth runs out of moves, it starts again (`attempts`),
+   still from the same seed stream, so it stays reproducible. The finished maze must pass the full rule check.
+
+```toml
+[topography]
+generator = "grow"
+turn_cost = 4.0
+
+[[rules]]
+rule = "min_wall_thickness"   # walls at least 2 thick; without this rule grow uses 1
+size = 2
+
+[[rules]]
+rule = "max_block"            # dig until no wall block is 7x7; without it, max_wall_block applies
+tile = "wall"
+size = 7
+```
+
+| Key | Default | Range | Meaning |
+|---|---|---|---|
+| `start` | `"auto"` | `auto`, `ring`, `center` | `ring`: a corridor along the inside of the shape, arcade-like. `center`: a small loop in the middle of the shape (its deepest point; with `mirror`, on the mirror axis), from which the maze grows outwards. It works for any shape, rectangles too, and gives a less regular border than the ring. `auto`: the ring for rectangular shapes, otherwise center. A ring along a curved edge is one long winding corridor, so for curved shapes ask for `ring` explicitly if you want it. |
+| `turn_cost` | `4.0` | ≥ 0 | Extra cost of a turn. At `0` paths jog a lot (about 11% corner tiles in 31×31 mazes). From about `1` up, paths turn only where they must (about 7.5%), so values above that change little. |
+| `noise` | `1.5` | ≥ 0 | Random extra cost per tile: varies which way paths go, so mazes from different seeds differ more. |
+| `depth_bonus` | `3.0` | ≥ 0 | How much cheaper the middle of a wall block is than its edge: higher makes paths swing deeper into empty space. |
+| `mirror` | `"none"` | `none`, `horizontal`, `vertical`, `both` | Every path is mirrored. The shape must be symmetric the same way. |
+| `max_wall_block` | `7` | ≥ 3 | The largest wall block allowed when the recipe has no `max_block(wall)` rule. |
+| `extra_paths` | `0` | ≥ 0 | Paths dug after every rule holds, for a more open maze. Each one must keep every rule. |
+| `search_radius` | `16` | ≥ 6 | Each path is searched within this many tiles of its target. Larger allows longer detours, at some cost in speed. |
+| `max_failures` | `80` | ≥ 1 | Failed digs in a row before an attempt gives up. |
+| `attempts` | `6` | ≥ 1 | Fresh starts before generation fails. Strict run rules on large mazes sometimes need four or five; each costs as much time as a whole maze. |
+
+**How `grow` meets each rule**
+
+| Rule | How it is met |
+|---|---|
+| `connected`, `max_dead_ends` | By construction: both ends of every path attach to existing corridors. |
+| `min_wall_thickness(t)` | By construction: paths cross only wall more than `t` tiles from any corridor. |
+| `max_block(corridor, 2)`, `no_diagonal_contact` | Checked on every path (corridors are always one tile wide). |
+| `max_block(wall, k)` | Paths are dug into every block that is too big. |
+| `max_straight_run`, `max_corridor_length` | Overlong corridors get a junction: a straight bridge or a branch. |
+| `min_loops`, `min_junction_share`, `walkable_fraction.min` | More paths are dug until they hold. |
+| `walkable_fraction.max` | Checked: no path may cross it. |
+| `mirror_symmetric` | Every path is mirrored when `topography.mirror` is set. |
+
+**Limits:**
+
+- `grow` makes one-tile corridors only (`corridor_width` is a lattice setting).
+- `max_block(wall, k)` must be at least `2 × thickness + 1`: a path through a block needs `thickness` wall on
+  each side. This is checked before generating.
+- Curved and blob shapes are filled as far as paths reach, so the maze's outline can be a bit smaller than the shape.
+- **Speed:** about 0.1–0.3 s for 31×31 and 2–10 s around 50×55. At 101×101 it takes 5–8 s without run rules;
+  with `organic`'s run rules it is 5–30 s, and more when a seed needs several attempts. Higher `noise`,
+  `depth_bonus` and `search_radius` make every path slower to find. The lattice takes under 1 s at any size.
+- Rectangles and ellipses succeeded for every seed tested at the starter sizes. On small blobs with strict run rules
+  (`max_straight_run = 9`, `max_corridor_length = 16`), about 1 seed in 12 fails with an error naming the rule.
+  When you leave out `--maze-seed`, a seed that fails is replaced by another random one, and
+  `mazes generate --count` reports a failed seed and goes on. An experiment stops at a failed run, naming the seed.
 
 ---
 
@@ -244,7 +329,7 @@ The three **hard rules** always apply to generated mazes; you don't need to list
 | `walkable_fraction` | `min` (default 0), `max` (default 1): 0..1 | Corridor tiles as a share of the maze area. The area is every tile that isn't void, so after outer-wall trimming it is the corridors plus their visible walls. |
 | `mirror_symmetric` | `axis`: `horizontal`, `vertical` or `both` | Corridors are unchanged by that mirror. Needs `topography.mirror` set to the same axis or `both`. |
 
-**How the lattice generator meets each rule**
+**How the lattice generator meets each rule** (for `grow`, see [its own table](#the-grow-generator))
 
 | Rule | How it is met |
 |---|---|
@@ -325,6 +410,8 @@ python -m pacman_otm simulate --maze open-lattice --maze-set size=51x51 --maze-s
 | `blob-lattice` | Organic outline, varying size. | 50..70 blob (`fill = 0.8`), `spacing = [3, 6]`, `node_dropout = 0.1`, walls 2..6 thick, runs ≤ 15, corridors ≤ 20. |
 | `twisty` | Winding and tree-like. | `straightness = -0.8`, `extra_loops = 0.03`, up to 6 dead ends, random start. |
 | `wide-halls` | Two-tile corridors. | `corridor_width = 2`, `spacing = [3, 5]`. |
+| `organic` | Winding, hand-made-looking arcade maze. | `generator = "grow"`, 25..41 sizes, walls ≥ 2, wall blocks < 7, runs ≤ 12, corridors ≤ 20, no dead ends. |
+| `grotto` | A mirrored, oval cave grown from its middle. | `grow` on an ellipse, `start = "center"`, `noise = 8`, `depth_bonus = 20`, `extra_paths = 4`, mirrored left-right, walls ≥ 2, corridors ≤ 16. About 1.5 s per maze. |
 
 They are good starting points: copy one and change it.
 
@@ -332,6 +419,8 @@ They are good starting points: copy one and change it.
 
 ## Recipe ideas
 
+- **Organic arcade:** start from `organic`. For a more open maze use `extra_paths = 8`; for wider wall
+  blocks use `max_block(wall, 9)`; for a symmetric maze use `mirror = "horizontal"`.
 - **Arcade walls:** `spacing = [3, 5]` with `min_wall_thickness(2)` and `max_block(wall, 5)`: every wall 2 to 4 thick.
 - **Dense and choiceful:** `spacing = [2, 3]`, `extra_loops = 0.3`, `min_junction_share = 0.2`.
 - **Long halls with few choices:** `straightness = 1`, `extra_loops = 0.05`, and no `max_straight_run` rule.

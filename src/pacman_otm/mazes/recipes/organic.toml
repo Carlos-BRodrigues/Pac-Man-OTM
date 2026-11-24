@@ -1,0 +1,49 @@
+name = "organic"
+description = "Winding, hand-made-looking arcade maze: grown path by path, walls at least two thick, no dead ends."
+
+[size]
+height = [25, 41]
+width = [25, 41]
+
+[shape]
+kind = "rectangle"
+
+[topography]
+generator = "grow"
+start = "auto"           # ring for rectangles, a centre loop for other shapes
+turn_cost = 4.0          # higher: longer straight stretches; lower: more jogs
+noise = 1.5              # higher: paths wander more
+depth_bonus = 3.0        # higher: paths swing further into empty wall
+mirror = "none"          # none | horizontal | vertical | both
+
+[[rules]]
+rule = "max_dead_ends"
+count = 0
+
+[[rules]]
+rule = "max_block"
+tile = "corridor"
+size = 2
+
+[[rules]]
+rule = "no_diagonal_contact"
+
+[[rules]]
+rule = "min_wall_thickness"
+size = 2
+
+[[rules]]
+rule = "max_block"
+tile = "wall"
+size = 7
+
+[[rules]]
+rule = "max_straight_run"
+length = 12
+
+[[rules]]
+rule = "max_corridor_length"
+length = 20
+
+[content.start]
+placer = "center"
