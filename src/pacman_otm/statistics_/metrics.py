@@ -6,6 +6,7 @@ from pacman_otm.simulation.engine import SimulationEngine
 
 @dataclass
 class SimulationMetrics:
+    # Ticks: the run's duration (see simulation/speeds.py).
     total_steps: int
     initial_pellets: int
     collected_pellets: int
@@ -15,6 +16,9 @@ class SimulationMetrics:
     termination_reason: str | None
     # Ghosts in the run; a run they end has termination_reason "caught".
     ghosts: int = 0
+    # Tiles Pac-Man moved: the length of his path. Below total_steps when he was
+    # slowed by pellets or stood against a wall.
+    pacman_moves: int = 0
 
     elapsed_time_seconds: float | None = None
     controller_time_seconds: float | None = None
@@ -44,6 +48,11 @@ class SimulationMetrics:
             completed=engine.state.termination_reason == "completed",
             termination_reason=engine.state.termination_reason,
             ghosts=len(engine.state.ghosts),
+            pacman_moves=sum(
+                1
+                for before, after in zip(engine.states, engine.states[1:])
+                if before.pacman_position != after.pacman_position
+            ),
             elapsed_time_seconds=elapsed_time_seconds,
             controller_time_seconds=controller_time_seconds,
         )

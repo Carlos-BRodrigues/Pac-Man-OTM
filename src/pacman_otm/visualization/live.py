@@ -6,6 +6,7 @@ from pacman_otm.visualization.animation import (
     INITIAL_POSE,
     SUBFRAMES,
     ends_in_death,
+    pacman_track,
     step_poses,
 )
 from pacman_otm.visualization.pygame_renderer import PygameRenderer
@@ -69,12 +70,7 @@ class LivePygameVisualizer:
             return False
 
         previous = self._previous_frame
-        poses = step_poses(
-            self._pose,
-            previous.state.pacman_position,
-            frame.state.pacman_position,
-            self.subframes,
-        )
+        poses = step_poses(self._pose, pacman_track(previous.state, frame.state), self.subframes)
 
         for index, pose in enumerate(poses, start=1):
             if index > 1:

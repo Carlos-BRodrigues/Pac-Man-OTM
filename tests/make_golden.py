@@ -16,8 +16,8 @@ from golden_tools import GOLDEN_CASES, GOLDEN_DIR, run_case, summarize  # noqa: 
 def main() -> None:
     GOLDEN_DIR.mkdir(exist_ok=True)
 
-    for file_name, controller, maze, seed in GOLDEN_CASES:
-        summary = summarize(run_case(controller, maze, seed))
+    for file_name, controller, maze, seed, speeds in GOLDEN_CASES:
+        summary = summarize(run_case(controller, maze, seed, speeds))
         path = GOLDEN_DIR / f"{file_name}.json"
         path.write_text(json.dumps(summary) + "\n", encoding="utf-8")
         print(f"Wrote {path} ({len(summary['actions'])} actions)")

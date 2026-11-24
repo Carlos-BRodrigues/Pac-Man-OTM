@@ -77,10 +77,25 @@ one, above the ghost house, and every starter recipe has one.
 - On a layout or saved maze, its own spawns come first; extra ones are placed at random from `--maze-seed`
   (default 0), at least 10 steps from the start.
 
-**How ghosts move.** A ghost moves every step and never turns back, except at a dead end. It always knows the
+**How ghosts move.** A ghost keeps moving and never turns back, except at a dead end. It always knows the
 shortest path to its target that it can drive without reversing, but it can only choose at junctions. It decides
-one tile early: as it steps onto a junction, the exit it will take there is already fixed, using where Pac-Man
+one tile early: as it moves onto a junction, the exit it will take there is already fixed, using where Pac-Man
 was at that moment. A late turn by Pac-Man can therefore juke it.
+
+### `--speeds arcade|equal`
+
+Time runs in **ticks**. A move to the next tile costs 16 units of progress; every tick a mover gains its speed,
+and leftover progress carries into the next tile, so the ratios are exact.
+
+| Preset | Pac-Man | Ghosts | Pellet eaten |
+|---|---|---|---|
+| `arcade` (default) | 16 (1 tile per tick) | 15 (15/16 of Pac-Man) | costs Pac-Man 2 units: a corridor of dots at 16/18 |
+| `equal` | 16 | 16 | no cost: the game before speeds existed |
+
+With `arcade`, Pac-Man pulls away from a ghost in a cleared corridor and loses ground while eating. Everyone
+still decides once per tile, at the tile centre, so controllers and pathfinding work in whole tiles. A ghost
+catches Pac-Man when it occupies his tile (a mover occupies its next tile once halfway there) or when they swap
+tiles. Results count `total_steps` in ticks (time) and `pacman_moves` in tiles (path length).
 
 ---
 
@@ -101,7 +116,8 @@ python -m pacman_otm simulate --maze small --controller random-walk --seed 7 --o
 | `--maze`, `--maze-seed`, `--maze-set`, `--ghosts` | `classic`, random, the maze's ghosts | See [Choosing a maze](#choosing-a-maze). |
 | `--controller` | `nearest-pellet` | `nearest-pellet`, `random-walk`, or a tour controller over the metric closure: `nearest-pellet-tour`, `two-opt` (nearest neighbour + 2-opt), `held-karp` (optimal, at most 16 pellets). Tour controllers print their tour length, MST lower bound and gap. |
 | `--seed N` | `42` | Seed for stochastic controllers such as `random-walk`. |
-| `--max-steps N` | `3000` | Stop after this many steps. |
+| `--speeds` | `arcade` | `arcade` or `equal`; see [`--speeds`](#--speeds-arcadeequal). |
+| `--max-steps N` | `3500` | Stop after this many ticks. |
 | `--visualize` | off | Show the run live. |
 | `--scale N` | fits the screen | Whole-number pixel scale: each 8×8 tile is drawn N times larger, pixel-exact. Without it the window fills 85% of the screen's height or width (whichever the maze's shape reaches first), so every maze gets a window of about the same size. |
 | `--save` | off | Save the result to `results/<controller>_<maze>_<timestamp>.json`. A recipe maze is named `<recipe>-seed<N>`. |
@@ -129,7 +145,8 @@ python -m pacman_otm play --maze classic-like --save
 After a 2-second "READY!" Pac-Man starts moving left and keeps moving. Steer with the **arrow keys** or **WASD**; a
 turn pressed early is taken at the next opening. **Esc** quits.
 
-The options are the same as `simulate` (`--maze…`, `--ghosts`, `--max-steps`, `--scale`, `--save`, `--output`).
+The options are the same as `simulate` (`--maze…`, `--ghosts`, `--speeds`, `--max-steps`, `--scale`, `--save`,
+`--output`).
 Use `--ghosts 0` for a ghost-free run.
 Results are named `manual_<maze>_<timestamp>.json` and are saved only on request.
 
@@ -155,7 +172,8 @@ python -m pacman_otm experiment --maze my-mazes --controller nearest-pellet-tour
 | `--controller` | `nearest-pellet` | The controller to test. |
 | `--runs N` | `10`, or the set size | Number of runs. With a maze set, the default is one run per maze; more runs cycle through the set. |
 | `--seed N` | `42` | The **experiment seed**. Run *i* gets its maze seed and controller seed from it. |
-| `--max-steps N` | `3000` | Per run. |
+| `--max-steps N` | `3500` | Ticks per run. |
+| `--speeds` | `arcade` | See [`--speeds`](#--speeds-arcadeequal); recorded in `results.json`. |
 | `--name NAME` | `<controller>_<maze>` | Folder name; `_001`, `_002`, … is added if it already exists. |
 | `--output-dir DIR` | `results` | Where the experiment folder goes. |
 | `--visualize` | off | Show every run live in one window. Each run's maze appears in turn. |
@@ -198,7 +216,7 @@ results/nearest-pellet_open-lattice/
 `results.csv` columns, in order:
 
 1. Run identity: `run`, `maze`, `maze_seed`, `controller_seed`.
-2. Run metrics: `total_steps`, `collected_pellets`, `completion_rate`, …
+2. Run metrics: `total_steps` (ticks), `collected_pellets`, `completion_rate`, …, `ghosts`, `pacman_moves` (tiles).
 3. Maze metrics: `maze_walkable_tiles`, `maze_loops`, `maze_dead_ends`, `maze_junction_share`,
    `maze_longest_straight_run`, `maze_longest_corridor`.
 4. Tour controllers only: `tour_pellets`, `tour_length`, and where reported `tour_lower_bound` (MST),
@@ -213,7 +231,7 @@ results/nearest-pellet_open-lattice/
 ## `replay`
 
 Plays back saved runs, ghosts included. A replay only reads the files; nothing is run again. Result files from
-before ghosts (format 3) are rejected: run them again.
+before speeds (format 4 or older) are rejected: run them again.
 
 ```powershell
 python -m pacman_otm replay run.json                                # one result (also looked up in results/)
@@ -223,7 +241,7 @@ python -m pacman_otm replay nearest-pellet_open-lattice --fps 20    # bare names
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--fps N` | `10` | Starting speed (steps per second). |
+| `--fps N` | `10` | Starting speed (ticks per second). |
 | `--no-auto-advance` | off | For experiments: stop at the end of each run instead of moving on to the next. |
 | `--scale N` | fits the screen | Window scale. |
 

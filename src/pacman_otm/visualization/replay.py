@@ -6,6 +6,7 @@ from pacman_otm.visualization.animation import (
     SUBFRAMES,
     ends_in_death,
     poses_for_states,
+    pacman_track,
     step_poses,
 )
 from pacman_otm.visualization.pygame_renderer import PygameRenderer
@@ -221,11 +222,7 @@ class ReplayPygameVisualizer:
             return
 
         next_frame = self.replay.get_frame(index + 1)
-        pose = step_poses(
-            self.poses[index],
-            frame.state.pacman_position,
-            next_frame.state.pacman_position,
-        )[subframe - 1]
+        pose = step_poses(self.poses[index], pacman_track(frame.state, next_frame.state))[subframe - 1]
 
         self.renderer.draw(
             next_frame,

@@ -8,16 +8,16 @@ from golden_tools import GOLDEN_CASES, GOLDEN_DIR, run_case, summarize
 
 
 @pytest.mark.parametrize(
-    ("file_name", "controller", "maze", "seed"),
+    ("file_name", "controller", "maze", "seed", "speeds"),
     GOLDEN_CASES,
     ids=[case[0] for case in GOLDEN_CASES],
 )
-def test_matches_golden(file_name: str, controller: str, maze: str, seed: int) -> None:
+def test_matches_golden(file_name: str, controller: str, maze: str, seed: int, speeds: str) -> None:
     expected = json.loads(
         (GOLDEN_DIR / f"{file_name}.json").read_text(encoding="utf-8")
     )
 
-    actual = summarize(run_case(controller, maze, seed))
+    actual = summarize(run_case(controller, maze, seed, speeds))
 
     assert actual["actions"] == expected["actions"]
     assert actual["states"] == expected["states"]
@@ -26,3 +26,4 @@ def test_matches_golden(file_name: str, controller: str, maze: str, seed: int) -
     assert actual["controller"] == expected["controller"]
     assert actual.get("ghosts") == expected.get("ghosts")
     assert actual.get("ghost_decisions") == expected.get("ghost_decisions")
+    assert actual.get("pacman_progress") == expected.get("pacman_progress")

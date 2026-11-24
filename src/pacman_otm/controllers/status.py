@@ -19,13 +19,13 @@ class ControllerStatus:
 @dataclass(frozen=True)
 class GhostStatus(ControllerStatus):
     """
-    A ghost's intentions after one decision. planned_path starts at the tile
-    the ghost moves to this step (path_index 0) and is the shortest legal path
-    from there to the target, beginning with the committed exit.
+    A ghost's intentions after one decision. planned_path runs from the
+    ghost's tile through decision_tile (path_index 0) along the shortest legal
+    path to the target, beginning with the committed exit.
     """
 
-    # The exit committed for decision_tile (the tile the ghost moves to this
-    # step); it is taken on the next step and cannot be changed.
+    # The exit committed for decision_tile (the tile the ghost is moving to, or
+    # its spawn for the first move); it cannot be changed.
     decision: Action | None = None
     decision_tile: Position | None = None
     # The legal exits at decision_tile.

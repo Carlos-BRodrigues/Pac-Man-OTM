@@ -12,6 +12,7 @@ from pacman_otm.controllers.ghosts.registry import create_ghosts, ghost_lineup
 from pacman_otm.experiments.seeding import RunSeeds, derive_run_seeds
 from pacman_otm.simulation.engine import SimulationEngine
 from pacman_otm.simulation.ghosts import CAUGHT_REASON
+from pacman_otm.simulation.speeds import ARCADE, SpeedRules
 from pacman_otm.simulation.frame import SimulationFrame
 from pacman_otm.simulation.runner import DEFAULT_MAX_STEPS, run_simulation
 from pacman_otm.simulation.result import SimulationResult
@@ -78,6 +79,7 @@ class ExperimentRunner:
         on_run: RunCallback | None = None,
         maze_info: dict[str, Any] | None = None,
         on_run_start: RunStartCallback | None = None,
+        speeds: SpeedRules = ARCADE,
     ) -> None:
 
         self.maze_factory = maze_factory
@@ -92,6 +94,7 @@ class ExperimentRunner:
         # Written once under "experiment" in results.json, e.g. the recipe of per-run mazes.
         self.maze_info = dict(maze_info or {})
         self.on_run_start = on_run_start
+        self.speeds = speeds
 
     def _create_output_dir(self) -> Path:
 
@@ -128,7 +131,7 @@ class ExperimentRunner:
 
             maze = self.maze_factory(run_index, seeds.maze_seed)
             ghost_kinds = ghost_lineup(maze)
-            engine = SimulationEngine(maze, ghost_kinds)
+            engine = SimulationEngine(maze, ghost_kinds, self.speeds)
             controller = self.controller_factory(maze, seeds.controller_seed)
 
             on_frame = (
@@ -196,6 +199,7 @@ class ExperimentRunner:
 
         numeric_fields = [
             "total_steps",
+            "pacman_moves",
             "collected_pellets",
             "remaining_pellets",
             "completion_rate",
@@ -287,6 +291,7 @@ class ExperimentRunner:
                 "stopped_early": experiment.stopped_early,
                 "seed": self.seed,
                 "max_steps": self.max_steps,
+                "speeds": self.speeds.to_dict(),
             },
             "aggregates": self._calculate_aggregates(experiment.runs),
             "individual_runs": run_records,

@@ -67,9 +67,13 @@ def test_nearest_neighbour_matches_nearest_pellet_tour_targets() -> None:
     targets = []
     engine = SimulationEngine(maze)
     while not engine.state.terminated:
-        engine.step(controller.select_action(engine.state))
-        if not targets or targets[-1] != controller.current_target:
-            targets.append(controller.current_target)
+        if engine.pacman_needs_decision():
+            engine.decide_pacman(controller.select_action(engine.state))
+
+            if not targets or targets[-1] != controller.current_target:
+                targets.append(controller.current_target)
+
+        engine.advance()
 
     # The online controller skips nothing: each target is the nearest from the last one.
     assert targets == [closure.nodes[node] for node in order[1:]]
@@ -95,7 +99,8 @@ def test_tour_controllers_complete_and_report(controller: str, spec: str) -> Non
     tour = result.controller["tour"]
 
     assert result.metrics.completed
-    assert result.metrics.total_steps <= tour["tour_length"]
+    # The path walked is never longer than the planned tour (time also counts pellet pauses).
+    assert result.metrics.pacman_moves <= tour["tour_length"]
     assert tour["pellets"] == len(maze.initial_pellets)
 
     if controller != "held-karp":

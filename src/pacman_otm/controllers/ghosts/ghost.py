@@ -16,17 +16,18 @@ class GhostController(Controller):
     The movement every ghost shares. A subclass only says where it wants to go
     (`target`); this class decides how, under the arcade constraints:
 
-    - A ghost moves every step and never reverses, except at a dead end.
+    - A ghost moves all the time and never reverses, except at a dead end.
     - It always knows the shortest legal path to its target (NoReverseSearch),
       but can only act on it at junctions; in a corridor or a turn there is one move.
-    - It decides one tile ahead. When it moves onto tile Y, it already chooses
-      the exit it will take out of Y, using Pac-Man's position at that moment,
-      and that choice is final. A player who turns after a ghost has committed
-      can juke it.
+    - It decides one tile ahead: while moving from its tile onto the next, it
+      already chooses the exit it will take out of that next tile, using where
+      Pac-Man is at that moment, and that choice is final. A player who turns
+      after a ghost has committed can juke it.
 
-    Memory: `direction`, the move out of the current tile (already committed),
-    and `next_direction`, the exit out of the tile it is moving to. At the spawn
-    there is no heading, so the first move is free.
+    The engine asks once per tile, and keeps the commitment in the ghost's state
+    (GhostState.next_heading), so this controller has no memory of its own. At
+    the spawn there is no heading yet: it is asked for a free first move, then
+    for the exit of the tile that move leads to.
     """
 
     controller_type = "ghost"
@@ -44,48 +45,46 @@ class GhostController(Controller):
         """The tile this ghost wants to reach, given the current state."""
 
     def reset(self) -> None:
-        self.direction: Action | None = None
-        self.next_direction: Action | None = None
         self.clear_status()
 
     def select_action(self, state: SimulationState) -> Action:
-        position = state.ghosts[self.ghost_index].position
+        ghost = state.ghosts[self.ghost_index]
         target = self.target(state)
 
-        if self.next_direction is None:
-            # At the spawn: no heading, so any first move.
-            path = self.search.find_path(position, None, target)
-            self.direction = path[0] if path else self.search.legal_moves(position, None)[0]
-        else:
-            self.direction = self.next_direction
+        # At the spawn: any first move. Otherwise: the exit of the tile ahead.
+        tile, heading = (
+            (ghost.position, None)
+            if ghost.heading is None
+            else (self.maze.get_destination(ghost.position, ghost.heading), ghost.heading)
+        )
 
-        ahead = self.maze.get_destination(position, self.direction)
-        options = self.search.legal_moves(ahead, self.direction)
+        options = self.search.legal_moves(tile, heading)
         decided = len(options) > 1
 
-        # The search runs at every junction, and every step when the overlay needs the path.
+        # The search runs at every junction, and every tile when the overlay needs the path.
         path = (
-            self.search.find_path(ahead, self.direction, target)
+            self.search.find_path(tile, heading, target)
             if decided or self._status_collection_enabled
             else None
         )
 
-        # A target on the junction itself, or unreachable: the first legal exit.
-        self.next_direction = path[0] if decided and path else options[0]
+        # A target on that tile itself, or unreachable: the first legal exit.
+        choice = path[0] if decided and path else options[0]
 
         if self._status_collection_enabled:
+            start = (ghost.position,) if tile != ghost.position else ()
             self._update_status(
                 GhostStatus(
                     target=target,
-                    planned_path=self._positions(ahead, path or [self.next_direction]),
-                    decision=self.next_direction,
-                    decision_tile=ahead,
+                    planned_path=start + self._positions(tile, path or [choice]),
+                    decision=choice,
+                    decision_tile=tile,
                     options=options,
                     decided=decided,
                 )
             )
 
-        return self.direction
+        return choice
 
     def _positions(self, start: Position, path: list[Action]) -> tuple[Position, ...]:
         positions = [start]
