@@ -17,8 +17,9 @@ from pacman_otm.statistics_.serialization import pretty_json
 
 ControllerFactory = Callable[[Maze, int], Controller]
 
-# maze seed -> maze. A fixed maze ignores the seed; a generator will use it.
-MazeFactory = Callable[[int], Maze]
+# (run index, maze seed) -> maze. A fixed maze ignores both, a recipe uses the seed,
+# and a maze set uses the run index.
+MazeFactory = Callable[[int, int], Maze]
 
 # Called after each run with (run index, result), e.g. to print progress.
 RunCallback = Callable[[int, SimulationResult], None]
@@ -121,7 +122,7 @@ class ExperimentRunner:
             seeds = derive_run_seeds(self.seed, run_index)
             run_seeds.append(seeds)
 
-            maze = self.maze_factory(seeds.maze_seed)
+            maze = self.maze_factory(run_index, seeds.maze_seed)
             engine = SimulationEngine(maze)
             controller = self.controller_factory(maze, seeds.controller_seed)
 

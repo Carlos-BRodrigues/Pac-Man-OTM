@@ -33,6 +33,9 @@ from pacman_otm.visualization.sprite_preview import run_sprite_preview
 
 RESULTS_DIR = Path("results")
 
+# experiment --runs without a maze set (a set defaults to one run per maze).
+DEFAULT_EXPERIMENT_RUNS = 10
+
 
 def resolve_output_path(output: str | None, label: str) -> Path:
     """
@@ -134,9 +137,17 @@ def run_experiment(args: argparse.Namespace) -> None:
     mazes = experiment_mazes(args.maze, args.maze_set, args.maze_seed)
     name = args.name or f"{args.controller}_{mazes.label}"
 
+    if args.runs is None:
+        args.runs = mazes.set_size if mazes.set_size is not None else DEFAULT_EXPERIMENT_RUNS
+
+    if mazes.set_size is not None:
+        per_run = f" (a set of {mazes.set_size} mazes, run i plays maze i)"
+    else:
+        per_run = " (a new maze per run)" if mazes.per_run else ""
+
     print(
         f"Experiment '{name}': controller={args.controller}  maze={mazes.label}"
-        f"{' (a new maze per run)' if mazes.per_run else ''}  runs={args.runs}  seed={args.seed}"
+        f"{per_run}  runs={args.runs}  seed={args.seed}"
     )
 
     width = len(str(args.runs))
@@ -151,7 +162,9 @@ def run_experiment(args: argparse.Namespace) -> None:
         metrics = result.metrics
         maze_text = ""
 
-        if mazes.per_run:
+        if mazes.set_size is not None:
+            maze_text = f"  maze={result.maze.name}"
+        elif mazes.per_run:
             maze_metrics = analyze(result.maze)
             maze_text = (
                 f"  maze seed={result.maze.origin.seed} walkable={maze_metrics.walkable_tiles} "
@@ -348,6 +361,7 @@ def main() -> None:
     )
     add_maze_argument(
         experiment_parser,
+        allow_sets=True,
         seed_default=None,
         seed_help=(
             "Fix one recipe maze for every run. Without it, a recipe gives each run its own "
@@ -357,7 +371,11 @@ def main() -> None:
     experiment_parser.add_argument(
         "--runs",
         type=positive_int,
-        default=10,
+        default=None,
+        help=(
+            f"Number of runs. Default: the number of mazes for a maze set, "
+            f"{DEFAULT_EXPERIMENT_RUNS} otherwise."
+        ),
     )
     experiment_parser.add_argument(
         "--name",

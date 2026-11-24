@@ -49,10 +49,18 @@ class NearestPelletController(AlgorithmicController):
 
     def _select_next_target(self, state: SimulationState) -> None:
 
-        path = self.pathfinder.find_path_to_nearest(
+        found = self.pathfinder.find_path_to_nearest(
             self.maze, state.pacman_position, state.remaining_pellets
         )
 
+        if found is None:
+            self.current_target = None
+            self.current_plan = deque()
+            self.planned_path = ()
+            return
+
+        # Kept so the plan is followed to this pellet instead of replanned every step.
+        self.current_target, path = found
         self.current_plan = deque(path)
         self.path_index = 0
 

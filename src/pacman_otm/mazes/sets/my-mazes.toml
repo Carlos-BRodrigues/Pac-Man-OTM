@@ -1,0 +1,15 @@
+description = "The saved mazes plus classic and its 15-pellet sparse copy."
+
+mazes = [
+    "classic",
+    "classic-sparse",
+    "big-classic-like1",
+    "big-classic-like2",
+    "big-classic-like3",
+    "big_grotto1",
+    "classic-like1",
+    "classic-like2",
+    "grotto1",
+    "grotto2",
+    "lattice-special1",
+]

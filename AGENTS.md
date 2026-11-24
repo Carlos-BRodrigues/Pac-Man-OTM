@@ -30,6 +30,7 @@ python -m pacman_otm simulate --maze twisty --visualize           # random maze,
 python -m pacman_otm simulate --maze open-lattice --maze-seed 7 --save
 python -m pacman_otm play --maze small
 python -m pacman_otm experiment --maze open-lattice --runs 20 --seed 42 --visualize
+python -m pacman_otm experiment --maze my-mazes                   # a maze set: run i plays maze i
 python -m pacman_otm replay results/nearest-pellet_open-lattice   # every run of an experiment
 python -m pytest                                  # needs: pip install -e ".[dev]"
 python -m pytest -m slow                          # long seed sweeps (skipped by default)
@@ -69,6 +70,7 @@ Behaviour worth knowing before changing the CLI:
 | `mazes/origin.py`, `mazes/serialization.py` | `MazeOrigin` (how a maze was made: layout/generated, name, generator, params, seed); maze ↔ dict for results. |
 | `mazes/recipes/*.toml` | Starter recipes (open-lattice, wide-halls, blob-lattice, classic-like, twisty, organic, grotto), registered by file stem. `mazes/saved/` is written by `mazes generate --save`. |
 | `mazes/registry.py` | Layouts, recipes and saved mazes as named `MazeSource`s (`kind`, `build(seed)`); a name in two folders is an error. `resolve_maze_source(spec, overrides)`, `resolve_maze(spec, maze_seed, overrides)`, `save_maze` / `load_saved_maze`, `DEFAULT_MAZE`. |
+| `mazes/sets.py`, `mazes/sets/*.toml` | Maze sets: fixed lists of layout/saved mazes (no recipes) for `experiment --maze SET`; run i plays maze i mod K. A set name may not also be a maze name. |
 | `experiments/seeding.py` | `derive_run_seeds(experiment_seed, run_index)` → independent maze and controller seeds. |
 | `simulation/state.py` | `SimulationState`: position, remaining pellets, steps, termination. `copy()` / `to_dict()`. |
 | `simulation/engine.py` | `SimulationEngine`: the game rules. Executes an action, updates state, records history. Decides nothing. |
@@ -165,9 +167,6 @@ regenerate them (`python tests/make_golden.py`) when the change is intended, and
 
 - `statistics_/metrics.py` and `simulation/result.py` import `SimulationEngine`; metrics could instead be
   computed from a recorded history, keeping statistics independent of the live engine.
-- `NearestPelletController` runs one BFS per remaining pellet; a single BFS that stops at the nearest
-  pellet would be far faster on the classic maze, but tie-breaking between equally near pellets must be
-  kept identical (currently lowest `(row, col)`) or baseline results will change.
 - The tunnel row in the classic maze has no wrap-around.
 - Each saved state carries the full remaining-pellet set; storing per-step deltas would shrink files
   further but changes the result format.

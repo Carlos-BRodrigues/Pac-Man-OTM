@@ -124,6 +124,7 @@ python -m pacman_otm experiment --maze open-lattice --runs 20 --seed 42 --contro
 python -m pacman_otm experiment --maze blob-lattice --runs 10 --visualize                # watch it
 python -m pacman_otm experiment --maze open-lattice --maze-set size=11x11..41x41 --runs 50
 python -m pacman_otm experiment --maze classic --runs 20                                 # one fixed layout
+python -m pacman_otm experiment --maze my-mazes --controller nearest-pellet-tour         # a maze set: run i plays maze i
 ```
 
 | Option | Default | Meaning |
@@ -131,7 +132,7 @@ python -m pacman_otm experiment --maze classic --runs 20                        
 | `--maze`, `--maze-set` | `classic` | See [Choosing a maze](#choosing-a-maze). |
 | `--maze-seed N` | none | With a recipe: one maze (seed N) for every run. Without it, each run gets its own maze. |
 | `--controller` | `nearest-pellet` | The controller to test. |
-| `--runs N` | `10` | Number of runs. |
+| `--runs N` | `10`, or the set size | Number of runs. With a maze set, the default is one run per maze; more runs cycle through the set. |
 | `--seed N` | `42` | The **experiment seed**. Run *i* gets its maze seed and controller seed from it. |
 | `--max-steps N` | `1000` | Per run. |
 | `--name NAME` | `<controller>_<maze>` | Folder name; `_001`, `_002`, … is added if it already exists. |
@@ -143,6 +144,19 @@ python -m pacman_otm experiment --maze classic --runs 20                        
 **Comparing controllers fairly.** Run *i*'s maze depends only on `--seed` and *i*. Two controllers run with the same
 `--seed` therefore play exactly the same sequence of mazes. A recipe with a size range also gives each run its own
 size, drawn from the same seed.
+
+**Maze sets.** A set is a fixed list of mazes to reuse across controllers: a TOML file in
+`src/pacman_otm/mazes/sets/`, named by its file stem, listed by `mazes list`:
+
+```toml
+description = "Hand-picked mazes."
+mazes = ["classic", "classic-sparse", "grotto1"]
+```
+
+Entries are layout or saved-maze names (or `.txt`/`.json` paths). Recipes are refused, because a set must give the
+same mazes every time: save one first with `mazes save RECIPE NAME --maze-seed N`. `--maze-seed` and `--maze-set`
+don't apply to a set. `results.json` records the set name and its maze list. The starter set `my-mazes` holds
+the saved mazes plus `classic` and `classic-sparse` (classic with 15 spread-out pellets).
 
 **Stopping early.** Closing the visualization window stops the experiment. The runs finished so far are saved,
 and `results.json` records `"stopped_early": true`. A run whose maze cannot be generated also stops the

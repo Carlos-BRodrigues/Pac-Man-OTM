@@ -70,7 +70,7 @@ def _run_experiment(tmp_path, controller: str, name: str):
     maze = resolve_maze("small")
     requested_maze_seeds = []
 
-    def maze_factory(maze_seed: int):
+    def maze_factory(run_index: int, maze_seed: int):
         requested_maze_seeds.append(maze_seed)
         return maze
 

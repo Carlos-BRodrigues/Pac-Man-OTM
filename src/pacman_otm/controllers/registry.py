@@ -4,6 +4,9 @@ from pacman_otm.controllers.controller import Controller
 from pacman_otm.controllers.algorithmic.simple.nearest_pellet import (
     NearestPelletController,
 )
+from pacman_otm.controllers.algorithmic.tours.nearest_pellet_tour import (
+    NearestPelletTourController,
+)
 from pacman_otm.controllers.stochastic.random_walk import RandomWalkController
 from pacman_otm.mazes.maze import Maze
 
@@ -51,6 +54,11 @@ def create_controller_registry() -> ControllerRegistry:
     registry.register(
         "nearest-pellet",
         lambda maze, seed: NearestPelletController(maze),
+    )
+
+    registry.register(
+        "nearest-pellet-tour",
+        lambda maze, seed: NearestPelletTourController(maze),
     )
 
     registry.register(

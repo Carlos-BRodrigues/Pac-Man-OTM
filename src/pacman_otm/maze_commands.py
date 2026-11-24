@@ -29,6 +29,7 @@ from pacman_otm.mazes.registry import (
     resolve_maze_source,
     save_maze,
 )
+from pacman_otm.mazes.sets import MazeSet, maze_sets
 from pacman_otm.mazes.rules.base import RuleSet, Violation
 from pacman_otm.mazes.rules.hard import HARD_RULES
 from pacman_otm.mazes.rules.registry import RuleConfigError, rules_from_toml
@@ -65,14 +66,21 @@ def add_maze_options(
     )
 
 
-def add_maze_argument(parser: argparse.ArgumentParser, **seed_options) -> None:
+def add_maze_argument(
+    parser: argparse.ArgumentParser,
+    allow_sets: bool = False,
+    **seed_options,
+) -> None:
+    set_text = (
+        f" or a maze set ({', '.join(maze_sets())}; run i plays maze i)" if allow_sets else ""
+    )
     parser.add_argument(
         "--maze",
         metavar="SPEC",
         default=DEFAULT_MAZE,
         help=(
-            f"Maze name ({', '.join(create_maze_registry().names())}) or a path to a .txt "
-            f"layout, .toml recipe or .json saved maze. Default: {DEFAULT_MAZE}. "
+            f"Maze name ({', '.join(create_maze_registry().names())}){set_text}, or a path to a "
+            f".txt layout, .toml recipe or .json saved maze. Default: {DEFAULT_MAZE}. "
             f"See 'mazes list'."
         ),
     )
@@ -129,11 +137,14 @@ def maze_label(source: MazeSource, maze: Maze, seed: int) -> str:
 class ExperimentMazes:
     """The mazes of an experiment: a factory from the run's maze seed, and how to describe them."""
 
-    factory: Callable[[int], Maze]
+    # (run index, maze seed) -> maze
+    factory: Callable[[int, int], Maze]
     label: str
     per_run: bool
     # Written once into results.json.
     info: dict[str, Any]
+    # The number of mazes in a maze set (the default number of runs); None otherwise.
+    set_size: int | None = None
 
 
 def experiment_mazes(
@@ -144,13 +155,19 @@ def experiment_mazes(
     """
     A recipe without --maze-seed gives every run its own maze, built from the
     run's maze seed (derive_run_seeds), so every controller sees the same maze
-    sequence. A recipe with --maze-seed, a layout or a saved maze is one fixed maze.
+    sequence. A maze set gives run i its maze i (cycling when there are more runs
+    than mazes). A recipe with --maze-seed, a layout or a saved maze is one fixed maze.
     """
+    sets = maze_sets()
+
+    if spec in sets:
+        return _maze_set_mazes(sets[spec], overrides, maze_seed)
+
     source = resolve_maze_source(spec, overrides)
 
     if source.generated and maze_seed is None:
         return ExperimentMazes(
-            factory=source.build,
+            factory=lambda run_index, run_maze_seed: source.build(run_maze_seed),
             label=source.name,
             per_run=True,
             info={
@@ -169,10 +186,36 @@ def experiment_mazes(
         info["maze_recipe"] = source.recipe().to_dict()
 
     return ExperimentMazes(
-        factory=lambda run_maze_seed: maze,
+        factory=lambda run_index, run_maze_seed: maze,
         label=maze_label(source, maze, seed),
         per_run=False,
         info=info,
+    )
+
+
+def _maze_set_mazes(
+    maze_set: MazeSet,
+    overrides: list[str] | tuple[str, ...],
+    maze_seed: int | None,
+) -> ExperimentMazes:
+    if overrides or maze_seed is not None:
+        raise MazeSpecError(
+            f"'{maze_set.name}' is a maze set of fixed mazes; --maze-seed and --maze-set do not apply."
+        )
+
+    mazes = maze_set.build()
+
+    return ExperimentMazes(
+        factory=lambda run_index, run_maze_seed: mazes[run_index % len(mazes)],
+        label=maze_set.name,
+        per_run=True,
+        info={
+            "maze_kind": "set",
+            "maze_per_run": True,
+            "maze_set": maze_set.name,
+            "maze_set_mazes": [maze.name for maze in mazes],
+        },
+        set_size=len(mazes),
     )
 
 
@@ -203,6 +246,15 @@ def run_mazes_list(args: argparse.Namespace) -> None:
             description = f"(default) {description}".strip()
 
         print(f"{source.name:<16}{source.kind:<8}{size:>7}{pellets:>9}  {description}")
+
+    sets = maze_sets(registry=registry)
+
+    if sets:
+        print("\nMaze sets (for 'experiment --maze SET'):")
+
+        for maze_set in sets.values():
+            print(f"{maze_set.name:<16}{len(maze_set.specs):>3} mazes  {maze_set.description}")
+            print(f"{'':<16}{', '.join(maze_set.specs)}")
 
 
 # mazes show / check / preview

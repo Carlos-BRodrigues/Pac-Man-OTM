@@ -70,45 +70,49 @@ class BreadthFirstSearch:
         goals: set[Position],
     ) -> tuple[Position, list[Action]] | None:
         """
-        Shortest path to the closest goal. Ties between equally close
-        goals are broken by lowest (row, col), so results are deterministic.
+        The closest goal and the shortest path to it, or None if no goal is reachable.
+        Ties between equally close goals are broken by lowest (row, col), so results
+        are deterministic: the search finishes the whole distance level in which the
+        first goal appears before choosing.
         """
         if not goals:
-            return
+            return None
 
         maze.validate_position(start)
 
-        frontier = deque([start])
+        if start in goals:
+            return start, []
 
         parents: dict[Position, tuple[Position, Action] | None] = {start: None}
+        level = [start]
+        nearest_goal: Position | None = None
 
-        stop = False
+        while level and nearest_goal is None:
 
-        while frontier and not stop:
+            next_level = []
 
-            current = frontier.popleft()
+            for current in level:
 
-            movements = maze.get_valid_movements(current)
+                for action, neighbor in maze.get_valid_movements(current).items():
 
-            for action, neighbor in movements.items():
+                    if neighbor in parents:
+                        continue
 
-                if neighbor in parents:
-                    continue
+                    parents[neighbor] = (current, action)
+                    next_level.append(neighbor)
 
-                parents[neighbor] = (current, action)
-                frontier.append(neighbor)
+            reached = [position for position in next_level if position in goals]
 
-                if neighbor in goals:
-                    stop = True
-                    break
+            if reached:
+                nearest_goal = min(reached)
 
-        nearest_goal = set(parents.keys()).intersection(goals)
+            level = next_level
 
-        if not nearest_goal:
+        if nearest_goal is None:
             return None
 
         path = []
-        current = nearest_goal.pop()
+        current = nearest_goal
 
         while current != start:
 
@@ -119,4 +123,4 @@ class BreadthFirstSearch:
 
         path.reverse()
 
-        return path
+        return nearest_goal, path

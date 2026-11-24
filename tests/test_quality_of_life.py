@@ -75,10 +75,14 @@ def test_experiment_runs_get_sizes_from_their_maze_seeds(tmp_path) -> None:
     path.write_text("[size]\nheight = [11, 31]\nwidth = [11, 31]\n", encoding="utf-8")
 
     mazes = maze_commands.experiment_mazes(str(path), (), None)
-    sizes = [mazes.factory(derive_run_seeds(7, i).maze_seed).topography.shape for i in range(8)]
+    sizes = [
+        mazes.factory(i, derive_run_seeds(7, i).maze_seed).topography.shape for i in range(8)
+    ]
 
     assert len(set(sizes)) > 1
-    assert sizes == [mazes.factory(derive_run_seeds(7, i).maze_seed).topography.shape for i in range(8)]
+    assert sizes == [
+        mazes.factory(i, derive_run_seeds(7, i).maze_seed).topography.shape for i in range(8)
+    ]
 
 
 # Naming and saving mazes
