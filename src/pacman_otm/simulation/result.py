@@ -76,8 +76,8 @@ class SimulationResult:
                     next_action.value if next_action is not None else None
                 ),
             }
-            if state.ghost_position is not None:
-                entry["ghost_position"] = state.ghost_position
+            if state.ghost_positions:
+                entry["ghost_positions"] = list(state.ghost_positions)
 
             history.append(entry)
 
@@ -133,12 +133,24 @@ class SimulationResult:
         for state_data in data["states"]:
             state = SimulationState(maze)
             state.pacman_position = tuple(state_data["pacman_position"])
-            if state_data.get("ghost_position") is not None:
-                state.ghost_position = tuple(state_data["ghost_position"])
-            if state_data.get("ghost_direction") is not None:
-                state.ghost_direction = tuple(state_data["ghost_direction"])
+
+            if state_data.get("ghost_positions") is not None:
+                state.ghost_positions = tuple(
+                    tuple(p) for p in state_data["ghost_positions"]
+                )
+            elif state_data.get("ghost_position") is not None:
+                state.ghost_positions = (tuple(state_data["ghost_position"]),)
+
+            if state_data.get("ghost_directions") is not None:
+                state.ghost_directions = tuple(
+                    tuple(d) for d in state_data["ghost_directions"]
+                )
+            elif state_data.get("ghost_direction") is not None:
+                state.ghost_directions = (tuple(state_data["ghost_direction"]),)
+
             if state_data.get("ghost_period") is not None:
                 state.ghost_period = state_data["ghost_period"]
+
             state.remaining_pellets = {
                 tuple(position)
                 for position in state_data["remaining_pellets"]

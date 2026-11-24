@@ -9,6 +9,11 @@ from pacman_otm.visualization.theme import DEFAULT_THEME, Theme
 
 Position = tuple[int, int]
 
+GHOST_COLORS = (
+    (255, 0, 0),    # Blinky 1 (vermelho)
+    (255, 75, 0),   # Blinky 2 (vermelho-alaranjado para distinguir no replay)
+)
+
 
 class PygameRenderer:
     """
@@ -98,9 +103,22 @@ class PygameRenderer:
 
         self._draw_scene(frame, previous_frame, progress)
 
-        ghost_pos = self._ghost_position(frame, previous_frame, progress)
-        if ghost_pos is not None:
-            self._draw_ghost(ghost_pos, frame.state.ghost_direction)
+        prev_ghosts = (
+            previous_frame.state.ghost_positions
+            if previous_frame is not None
+            else ()
+        )
+        for idx, curr_g in enumerate(frame.state.ghost_positions):
+            prev_g = prev_ghosts[idx] if idx < len(prev_ghosts) else None
+            g_pixel = self._interpolate_tile(curr_g, prev_g, progress)
+            if g_pixel is not None:
+                g_dir = (
+                    frame.state.ghost_directions[idx]
+                    if idx < len(frame.state.ghost_directions)
+                    else (0, 0)
+                )
+                color = GHOST_COLORS[idx % len(GHOST_COLORS)]
+                self._draw_ghost(g_pixel, g_dir, color)
 
         position = self._player_position(frame, previous_frame, progress)
         self._blit_sprite(self.sprites.player(pose.mouth, pose.facing), position)
@@ -115,11 +133,14 @@ class PygameRenderer:
     ) -> None:
         self._draw_scene(frame, None, 1.0)
 
-        if frame.state.ghost_position is not None:
-            self._draw_ghost(
-                self._tile_pixel(frame.state.ghost_position),
-                frame.state.ghost_direction,
+        for idx, curr_g in enumerate(frame.state.ghost_positions):
+            g_dir = (
+                frame.state.ghost_directions[idx]
+                if idx < len(frame.state.ghost_directions)
+                else (0, 0)
             )
+            color = GHOST_COLORS[idx % len(GHOST_COLORS)]
+            self._draw_ghost(self._tile_pixel(curr_g), g_dir, color)
 
         position = self._tile_pixel(frame.state.pacman_position)
         self._blit_sprite(self.sprites.death[death_index], position)
@@ -183,21 +204,19 @@ class PygameRenderer:
         col = previous[1] + (current[1] - previous[1]) * progress
         return self._tile_pixel((row, col))
 
-    def _ghost_position(
+    def _interpolate_tile(
         self,
-        frame: SimulationFrame,
-        previous_frame: SimulationFrame | None,
+        current: Position | None,
+        previous: Position | None,
         progress: float,
     ) -> tuple[float, float] | None:
-        current = frame.state.ghost_position
         if current is None:
             return None
 
-        if previous_frame is None or progress >= 1.0:
+        if previous is None or progress >= 1.0:
             return self._tile_pixel(current)
 
-        previous = previous_frame.state.ghost_position
-        if previous is None or move_direction(previous, current) is None:
+        if move_direction(previous, current) is None:
             return self._tile_pixel(current)
 
         row = previous[0] + (current[0] - previous[0]) * progress
@@ -208,13 +227,13 @@ class PygameRenderer:
         self,
         tile_pixel: tuple[float, float],
         direction: tuple[int, int],
+        body_color: tuple[int, int, int] = GHOST_COLORS[0],
     ) -> None:
-        """Draw Blinky on the 8x8 base pixel grid."""
+        """Draw a ghost on the 8x8 base pixel grid."""
         x = round(tile_pixel[0])
         y = round(tile_pixel[1])
         s = self.scale
 
-        body_color = (255, 0, 0)
         eye_white = (255, 255, 255)
         eye_pupil = (33, 33, 255)
 

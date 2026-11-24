@@ -103,18 +103,12 @@ def parse_layout(text: str, name: str) -> Maze:
             f"Layout '{name}' needs exactly one '{START}' (Pac-Man start); found {found}."
         )
 
-    if len(ghost_starts) > 1:
-        found = ", ".join(str(g) for g in ghost_starts)
-        raise ValueError(
-            f"Layout '{name}' can have at most one '{GHOST_START}' (ghost start); found {found}."
-        )
-
     return Maze(
         topography=topography,
         pacman_start=starts[0],
         pellets=pellets,
         origin=MazeOrigin(source="layout", name=name),
-        ghost_start=ghost_starts[0] if ghost_starts else None,
+        ghost_starts=ghost_starts,
     )
 
 
@@ -127,6 +121,7 @@ def load_layout(path: Path) -> Maze:
 def format_layout(maze: Maze) -> str:
     """The inverse of parse_layout (pellets are written as '.')."""
 
+    ghost_set = set(maze.ghost_starts)
     lines = []
 
     for row in range(maze.height):
@@ -137,7 +132,7 @@ def format_layout(maze: Maze) -> str:
 
             if position == maze.pacman_start:
                 characters.append(START)
-            elif maze.ghost_start is not None and position == maze.ghost_start:
+            elif position in ghost_set:
                 characters.append(GHOST_START)
             elif position in maze.initial_pellets:
                 characters.append(".")

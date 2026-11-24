@@ -47,8 +47,8 @@ def _mst_lower_bound(pos: Position, remaining: list[Position]) -> int:
 
 class OptimalDPController(Controller):
     """
-    Programação Dinâmica Exata (Bellman / Held-Karp) com suporte a A* (MST)
-    e Horizonte Deslizante (MPC) automático para mapas grandes como 'classic'.
+    Programação Dinâmica Exata (Bellman / Held-Karp) com suporte a A* (MST),
+    múltiplos fantasmas perseguidores com quebra de simetria e MPC.
     """
 
     controller_type = "algorithmic"
@@ -57,7 +57,7 @@ class OptimalDPController(Controller):
         self,
         maze: Maze,
         use_astar: bool = False,
-        max_exact_pellets: int = 20,
+        max_exact_pellets: int = 12,
         horizon_pellets: int = 8,
     ) -> None:
         super().__init__()
@@ -85,16 +85,16 @@ class OptimalDPController(Controller):
         if not state.remaining_pellets:
             return next(iter(self.maze.get_valid_movements(state.pacman_position)))
 
-        # Caso 1: Instância tratável globalmente (ex: 'small') -> resolve uma única vez
+        # Caso 1: Instância tratável globalmente -> resolve uma única vez
         if len(state.remaining_pellets) <= self.max_exact_pellets and not self.used_receding_horizon:
             if self._plan is None:
                 self._plan = self._solve_subset(state, sorted(state.remaining_pellets))
             if self._plan:
                 return self._plan.popleft()
 
-        # Caso 2: Mapa grande (ex: 'classic') -> Horizonte Deslizante sobre as k_local mais próximas
+        # Caso 2: Mapa grande -> Horizonte Deslizante sobre as k_local mais próximas
         self.used_receding_horizon = True
-        if not self._plan or state.ghost_position is not None:
+        if not self._plan or bool(state.ghost_positions):
             px, py = state.pacman_position
             nearest_subset = sorted(
                 state.remaining_pellets,
@@ -121,11 +121,13 @@ class OptimalDPController(Controller):
 
         m = state.ghost_period
         phi0 = state.steps % m
+        init_ghosts = tuple(
+            sorted(zip(state.ghost_positions, state.ghost_directions))
+        )
         s0 = (
             state.pacman_position,
             0,
-            state.ghost_position,
-            state.ghost_direction,
+            init_ghosts,
             phi0,
         )
 
@@ -152,30 +154,39 @@ class OptimalDPController(Controller):
                 curr = fifo.popleft()
                 curr_g = g_cost[curr]
 
-            v, mask, g, d, phi = curr
+            v, mask, ghosts, phi = curr
             if mask == target_mask:
                 goal_state = curr
                 break
 
-            if g is not None:
+            if ghosts:
                 if phi == 0:
-                    next_g, next_d = ghost_step(self.maze, g, d, v)
+                    moved = [
+                        ghost_step(self.maze, g_pos, g_dir, v)
+                        for g_pos, g_dir in ghosts
+                    ]
                 else:
-                    next_g, next_d = g, d
+                    moved = list(ghosts)
+                # Quebra de simetria exata: fantasmas idênticos ordenados canonicamente
+                next_ghosts = tuple(sorted(moved))
                 next_phi = (phi + 1) % m
             else:
-                next_g, next_d, next_phi = None, (0, 0), 0
+                moved = []
+                next_ghosts = ()
+                next_phi = 0
 
             for action, next_v in self.maze.get_valid_movements(v).items():
-                if next_g is not None:
-                    if next_v == next_g or (next_v == g and v == next_g):
-                        continue
+                if any(
+                    next_v == next_g or (next_v == prev_g and v == next_g)
+                    for (prev_g, _), (next_g, _) in zip(ghosts, moved)
+                ):
+                    continue
 
                 next_mask = mask
                 if next_v in pellet_idx:
                     next_mask |= 1 << pellet_idx[next_v]
 
-                nxt = (next_v, next_mask, next_g, next_d, next_phi)
+                nxt = (next_v, next_mask, next_ghosts, next_phi)
                 new_cost = curr_g + 1
 
                 if new_cost < g_cost.get(nxt, 10**9):

@@ -9,7 +9,7 @@ def ghost_step(
     ghost_dir: tuple[int, int],
     target_pos: Position,
 ) -> tuple[Position, tuple[int, int]]:
-    """Deterministic greedy pursuit f(g_t, d_t, v_t) used by Blinky."""
+    """Deterministic greedy pursuit f(g_t, d_t, v_t) used by each Blinky agent."""
     valid_moves = list(maze.get_valid_movements(ghost_pos).values())
     if not valid_moves:
         return ghost_pos, (0, 0)
@@ -57,28 +57,29 @@ class SimulationEngine:
         if self.maze.is_walkable(destination):
             self.state.pacman_position = destination
 
-        # Simultaneous ghost transition using v_t (prev_pacman) and phase phi_t = t mod m
-        prev_ghost = self.state.ghost_position
-        if prev_ghost is not None:
-            if self.state.steps % self.state.ghost_period == 0:
-                next_ghost, next_dir = ghost_step(
-                    self.maze,
-                    prev_ghost,
-                    self.state.ghost_direction,
-                    prev_pacman,
-                )
-                self.state.ghost_position = next_ghost
-                self.state.ghost_direction = next_dir
+        # Simultaneous ghost transitions using v_t (prev_pacman) and phase phi_t = t mod m
+        prev_ghosts = self.state.ghost_positions
+        prev_dirs = self.state.ghost_directions
+
+        if prev_ghosts and self.state.steps % self.state.ghost_period == 0:
+            next_positions: list[Position] = []
+            next_directions: list[tuple[int, int]] = []
+            for prev_g, prev_d in zip(prev_ghosts, prev_dirs):
+                next_g, next_d = ghost_step(self.maze, prev_g, prev_d, prev_pacman)
+                next_positions.append(next_g)
+                next_directions.append(next_d)
+            self.state.ghost_positions = tuple(next_positions)
+            self.state.ghost_directions = tuple(next_directions)
 
         # Every attempted action consumes one step
         self.state.steps += 1
 
-        # Check cell collision (v_{t+1} == g_{t+1}) and edge crossing
-        if prev_ghost is not None and self.state.ghost_position is not None:
-            same_cell = self.state.pacman_position == self.state.ghost_position
+        # Check cell collision (v_{t+1} == g^{(i)}_{t+1}) and edge crossing for every ghost
+        for prev_g, curr_g in zip(prev_ghosts, self.state.ghost_positions):
+            same_cell = self.state.pacman_position == curr_g
             edge_swap = (
-                self.state.pacman_position == prev_ghost
-                and prev_pacman == self.state.ghost_position
+                self.state.pacman_position == prev_g
+                and prev_pacman == curr_g
             )
             if same_cell or edge_swap:
                 self.state.terminated = True

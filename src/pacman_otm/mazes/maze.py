@@ -12,7 +12,7 @@ Position = tuple[int, int]
 
 class Maze:
     """
-    The static map: tiles, Pac-Man's start, optional ghost start and initial pellets.
+    The static map: tiles, Pac-Man's start, optional ghost starts and initial pellets.
 
     Immutable after construction (read-only array, frozenset of pellets), so
     one Maze can be shared by many runs and by every state that refers to it.
@@ -36,6 +36,7 @@ class Maze:
         pellets: Iterable[Position],
         origin: MazeOrigin | None = None,
         ghost_start: Position | None = None,
+        ghost_starts: Iterable[Position] | None = None,
         ghost_period: int = 1,
     ) -> None:
         if ghost_period < 1:
@@ -45,9 +46,15 @@ class Maze:
         self.topography.flags.writeable = False
 
         self.pacman_start: Position = tuple(pacman_start)
-        self.ghost_start: Position | None = (
-            tuple(ghost_start) if ghost_start is not None else None
-        )
+        if ghost_starts is not None:
+            self.ghost_starts: tuple[Position, ...] = tuple(
+                tuple(g) for g in ghost_starts
+            )
+        elif ghost_start is not None:
+            self.ghost_starts = (tuple(ghost_start),)
+        else:
+            self.ghost_starts = ()
+
         self.ghost_period: int = ghost_period
         self.initial_pellets: frozenset[Position] = frozenset(
             tuple(position) for position in pellets
@@ -63,6 +70,10 @@ class Maze:
         self._neighbours = self._build_neighbours()
 
         self._validate_reachability()
+
+    @property
+    def ghost_start(self) -> Position | None:
+        return self.ghost_starts[0] if self.ghost_starts else None
 
     @property
     def height(self) -> int:
@@ -159,10 +170,11 @@ class Maze:
                 f"Pac-Man start {self.pacman_start} must be on a walkable tile."
             )
 
-        if self.ghost_start is not None and not self.is_walkable(self.ghost_start):
-            raise ValueError(
-                f"Ghost start {self.ghost_start} must be on a walkable tile."
-            )
+        for g_start in self.ghost_starts:
+            if not self.is_walkable(g_start):
+                raise ValueError(
+                    f"Ghost start {g_start} must be on a walkable tile."
+                )
 
         misplaced = sorted(
             pellet
