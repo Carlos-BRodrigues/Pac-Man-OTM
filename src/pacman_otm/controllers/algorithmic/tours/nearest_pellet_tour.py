@@ -1,9 +1,12 @@
 import math
 from collections import deque
+from typing import Any
 
 from pacman_otm.algorithms.pathfinding.bfs import BreadthFirstSearch
 from pacman_otm.algorithms.graph.metric_closure import MetricClosure
+from pacman_otm.algorithms.graph.mst import mst_weight
 from pacman_otm.controllers.algorithmic.base import AlgorithmicController
+from pacman_otm.controllers.algorithmic.tours.tour_controller import gap_percent
 from pacman_otm.controllers.controller import ControllerStatus
 from pacman_otm.mazes.maze import Maze
 from pacman_otm.simulation.actions import Action
@@ -30,18 +33,30 @@ class NearestPelletTourController(AlgorithmicController):
         self.pathfinder = BreadthFirstSearch()
         self.metric_closure = MetricClosure(maze)
         # Closure index -> node, to turn the chosen index back into a position.
-        self.nodes: list[Position] = sorted(
-            self.metric_closure.labels,
-            key=self.metric_closure.labels.__getitem__,
-        )
+        self.nodes: list[Position] = self.metric_closure.nodes
         self.reset()
 
     def reset(self) -> None:
+        # Closure distance of every target chosen so far: the tour this run makes.
+        self.tour_length = 0.0
         self.current_target: Position | None = None
         self.current_plan: deque[Action] = deque()
         self.planned_path: tuple[Position, ...] = ()
         self.path_index = 0
         self.clear_status()
+
+    def describe(self) -> dict[str, Any]:
+        lower_bound = mst_weight(self.metric_closure.distances)
+
+        return {
+            **super().describe(),
+            "tour": {
+                "pellets": len(self.nodes) - 1,
+                "tour_length": self.tour_length,
+                "lower_bound": lower_bound,
+                "gap_percent": gap_percent(self.tour_length, lower_bound),
+            },
+        }
 
     def select_action(self, state: SimulationState) -> Action:
 
@@ -101,6 +116,7 @@ class NearestPelletTourController(AlgorithmicController):
                 f"{distances[target_index]} steps, but BFS found {found}."
             )
 
+        self.tour_length += distances[target_index]
         self.current_target = target
         self.current_plan = deque(path)
         self.path_index = 0

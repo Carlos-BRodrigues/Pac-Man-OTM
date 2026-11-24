@@ -1,11 +1,11 @@
-from pacman_otm.simulation.result import SimulationResult
+from pacman_otm.mazes.registry import resolve_maze
+from pacman_otm.algorithms.graph.metric_closure import MetricClosure
 
-result = SimulationResult.load_json("results/test_replay.json")
+maze = resolve_maze("classic")
 
-print("Maze:", result.maze.height, result.maze.width)
-print("States:", len(result.states))
-print("Actions:", len(result.actions))
-print("Statuses:", len(result.statuses))
-print("Metrics:", result.metrics)
-print("Initial state:", result.get_state(0))
-print("Final state:", result.final_state)
+mc = MetricClosure(maze)
+
+mc.build_metric_closure()
+
+print(mc.metric_closure[:1])
+# print(mc.labels)

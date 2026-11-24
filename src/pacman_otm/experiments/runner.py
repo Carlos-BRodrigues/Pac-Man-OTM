@@ -11,7 +11,7 @@ from pacman_otm.controllers.controller import Controller
 from pacman_otm.experiments.seeding import RunSeeds, derive_run_seeds
 from pacman_otm.simulation.engine import SimulationEngine
 from pacman_otm.simulation.frame import SimulationFrame
-from pacman_otm.simulation.runner import run_simulation
+from pacman_otm.simulation.runner import DEFAULT_MAX_STEPS, run_simulation
 from pacman_otm.simulation.result import SimulationResult
 from pacman_otm.statistics_.serialization import pretty_json
 
@@ -70,7 +70,7 @@ class ExperimentRunner:
         maze_label: str,
         output_root: str | Path = "results",
         seed: int = 42,
-        max_steps: int = 1000,
+        max_steps: int = DEFAULT_MAX_STEPS,
         on_run: RunCallback | None = None,
         maze_info: dict[str, Any] | None = None,
         on_run_start: RunStartCallback | None = None,
@@ -202,7 +202,7 @@ class ExperimentRunner:
             for field in numeric_fields
         }
 
-        return {
+        aggregated = {
             "number_of_runs": len(results),
             "completed_runs": completed_runs,
             "failed_or_incomplete_runs": len(results) - completed_runs,
@@ -214,10 +214,30 @@ class ExperimentRunner:
             },
         }
 
+        tour_metrics = [self._tour_metrics(result) for result in results]
+
+        if tour_metrics[0]:
+            aggregated["tour_metrics"] = {
+                column: self._describe([float(item[column]) for item in tour_metrics])
+                for column in tour_metrics[0]
+            }
+
+        return aggregated
+
     @staticmethod
     def _maze_metrics(result: SimulationResult) -> dict[str, Any]:
         measured = analyze(result.maze).to_dict()
         return {f"maze_{column}": measured[column] for column in MAZE_METRIC_COLUMNS}
+
+    @staticmethod
+    def _tour_metrics(result: SimulationResult) -> dict[str, Any]:
+        """The numbers a tour controller reports about its plan, prefixed "tour_"; else nothing."""
+        tour = (result.controller or {}).get("tour") or {}
+        return {
+            key if key.startswith("tour_") else f"tour_{key}": value
+            for key, value in tour.items()
+            if isinstance(value, (int, float)) and not isinstance(value, bool)
+        }
 
     def _export_results(
         self,
@@ -245,6 +265,7 @@ class ExperimentRunner:
                     "controller_seed": seeds.controller_seed,
                     **result.metrics.to_dict(),
                     **self._maze_metrics(result),
+                    **self._tour_metrics(result),
                 }
             )
 

@@ -75,6 +75,9 @@ Behaviour worth knowing before changing the CLI:
 | `simulation/state.py` | `SimulationState`: position, remaining pellets, steps, termination. `copy()` / `to_dict()`. |
 | `simulation/engine.py` | `SimulationEngine`: the game rules. Executes an action, updates state, records history. Decides nothing. |
 | `algorithms/pathfinding/` | Pathfinders (`BreadthFirstSearch.find_path(maze, start, goal) -> list[Action] \| None`). Pure; no game decisions. |
+| `algorithms/graph/` | `MetricClosure` (start + pellet distance matrix: `nodes`, `distances`) and `mst.py` (`mst_weight`, Prim: the tour lower bound). |
+| `algorithms/tours/` | Pure tour algorithms on a distance matrix, open paths from node 0: `nearest_neighbour_tour`, `two_opt`, `held_karp_tour` (at most 16 pellets, `TourTooLargeError`), `tour_length`. No maze or game knowledge. |
+| `controllers/algorithmic/tours/` | `TourController` (plans on the first decision, walks the tour with BFS, skips eaten pellets, reports `describe()["tour"]`); `held-karp`, `two-opt` (NN + 2-opt; lower bound, gap, improvement over NN), `nearest-pellet-tour` (online, closure-driven; lower bound and gap). |
 | `controllers/controller.py` | `Controller`: `select_action(state) -> Action`, `reset()`, `describe()` (saved in results), optional `ControllerStatus`. `ControllerAborted(reason)` ends a run from inside a decision. |
 | `controllers/algorithmic/` | Deterministic autonomous controllers (`AlgorithmicController`), e.g. `simple/nearest_pellet.py`. |
 | `controllers/stochastic/` | `StochasticController` owns a seeded `self.rng`; `describe()` records the seed. E.g. `random_walk.py`. |

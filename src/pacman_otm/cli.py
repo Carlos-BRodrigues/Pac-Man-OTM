@@ -10,13 +10,14 @@ from pacman_otm.maze_commands import (
     load_maze,
     maze_label,
 )
+from pacman_otm.algorithms.tours.held_karp import TourTooLargeError
 from pacman_otm.mazes.analysis import analyze
 from pacman_otm.mazes.config import ConfigError
 from pacman_otm.mazes.generation.errors import GenerationError
 from pacman_otm.mazes.registry import MazeSpecError
 from pacman_otm.controllers.manual.manual import ManualController
 from pacman_otm.simulation.engine import SimulationEngine
-from pacman_otm.simulation.runner import run_simulation
+from pacman_otm.simulation.runner import DEFAULT_MAX_STEPS, run_simulation
 from pacman_otm.experiments.runner import ExperimentRunner
 
 from pacman_otm.controllers.registry import create_controller_registry
@@ -68,6 +69,29 @@ def save_result(
     print(f"Saved result to {path}")
 
 
+def describe_tour(tour: dict | None) -> str:
+    """One line about a tour controller's plan, e.g. its gap to the lower bound."""
+
+    if not tour:
+        return ""
+
+    text = f"Tour: {tour['pellets']} pellets, length {tour['tour_length']:g}"
+
+    if "lower_bound" in tour:
+        text += (
+            f", lower bound {tour['lower_bound']:g}"
+            f" (at most {tour['gap_percent']:.1f}% above optimal)"
+        )
+
+    if "nn_length" in tour:
+        text += (
+            f"; 2-opt improved nearest neighbour ({tour['nn_length']:g}) "
+            f"by {tour['improvement_percent']:.1f}%"
+        )
+
+    return text
+
+
 def run_simulate(args: argparse.Namespace) -> None:
     source, maze, maze_seed = load_maze(args.maze, args)
     engine = SimulationEngine(maze)
@@ -95,6 +119,11 @@ def run_simulate(args: argparse.Namespace) -> None:
             visualizer.close()
 
     print(result.metrics)
+
+    tour_text = describe_tour((result.controller or {}).get("tour"))
+
+    if tour_text:
+        print(tour_text)
 
     if args.show_history:
         for entry in result.history_summary():
@@ -162,11 +191,16 @@ def run_experiment(args: argparse.Namespace) -> None:
         metrics = result.metrics
         maze_text = ""
 
+        tour = (result.controller or {}).get("tour") or {}
+
+        if "gap_percent" in tour:
+            maze_text += f"  gap<={tour['gap_percent']:.1f}%"
+
         if mazes.set_size is not None:
-            maze_text = f"  maze={result.maze.name}"
+            maze_text += f"  maze={result.maze.name}"
         elif mazes.per_run:
             maze_metrics = analyze(result.maze)
-            maze_text = (
+            maze_text += (
                 f"  maze seed={result.maze.origin.seed} walkable={maze_metrics.walkable_tiles} "
                 f"loops={maze_metrics.loops}"
             )
@@ -286,7 +320,8 @@ def main() -> None:
     simulate_parser.add_argument(
         "--max-steps",
         type=positive_int,
-        default=1000,
+        default=DEFAULT_MAX_STEPS,
+        help=f"Stop a run after this many steps. Default: {DEFAULT_MAX_STEPS}.",
     )
     simulate_parser.add_argument(
         "--show-history",
@@ -333,7 +368,8 @@ def main() -> None:
     play_parser.add_argument(
         "--max-steps",
         type=positive_int,
-        default=1000,
+        default=DEFAULT_MAX_STEPS,
+        help=f"Stop a run after this many steps. Default: {DEFAULT_MAX_STEPS}.",
     )
     play_parser.add_argument(
         "--output",
@@ -400,7 +436,8 @@ def main() -> None:
     experiment_parser.add_argument(
         "--max-steps",
         type=positive_int,
-        default=1000,
+        default=DEFAULT_MAX_STEPS,
+        help=f"Stop a run after this many steps. Default: {DEFAULT_MAX_STEPS}.",
     )
     experiment_parser.add_argument(
         "--controller",
@@ -464,7 +501,7 @@ def main() -> None:
 
     try:
         args.func(args)
-    except (MazeSpecError, ConfigError, GenerationError) as error:
+    except (MazeSpecError, ConfigError, GenerationError, TourTooLargeError) as error:
         # Not a mistake in the arguments' syntax, so no usage text.
         parser.exit(2, f"{parser.prog}: error: {error}\n")
 

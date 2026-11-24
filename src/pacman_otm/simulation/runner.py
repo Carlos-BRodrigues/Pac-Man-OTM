@@ -8,11 +8,14 @@ from pacman_otm.simulation.result import SimulationResult
 from pacman_otm.statistics_.metrics import SimulationMetrics
 from pacman_otm.simulation.frame import SimulationFrame
 
+# Steps before a run is stopped ("max_steps"); large saved mazes need well over 1000.
+DEFAULT_MAX_STEPS = 3000
+
 
 def run_simulation(
     engine: SimulationEngine,
     controller: Controller,
-    max_steps: int = 1000,
+    max_steps: int = DEFAULT_MAX_STEPS,
     on_frame: Callable[[SimulationFrame], bool | None] | None = None,
 ) -> SimulationResult:
 

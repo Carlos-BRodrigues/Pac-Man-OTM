@@ -81,9 +81,9 @@ python -m pacman_otm simulate --maze small --controller random-walk --seed 7 --o
 | Option | Default | Meaning |
 |---|---|---|
 | `--maze`, `--maze-seed`, `--maze-set` | `classic`, random | See [Choosing a maze](#choosing-a-maze). |
-| `--controller` | `nearest-pellet` | `nearest-pellet` or `random-walk`. |
+| `--controller` | `nearest-pellet` | `nearest-pellet`, `random-walk`, or a tour controller over the metric closure: `nearest-pellet-tour`, `two-opt` (nearest neighbour + 2-opt), `held-karp` (optimal, at most 16 pellets). Tour controllers print their tour length, MST lower bound and gap. |
 | `--seed N` | `42` | Seed for stochastic controllers such as `random-walk`. |
-| `--max-steps N` | `1000` | Stop after this many steps. |
+| `--max-steps N` | `3000` | Stop after this many steps. |
 | `--visualize` | off | Show the run live. |
 | `--scale N` | fits the screen | Whole-number pixel scale: each 8×8 tile is drawn N times larger, pixel-exact. Without it the window fills 85% of the screen's height or width (whichever the maze's shape reaches first), so every maze gets a window of about the same size. |
 | `--save` | off | Save the result to `results/<controller>_<maze>_<timestamp>.json`. A recipe maze is named `<recipe>-seed<N>`. |
@@ -134,7 +134,7 @@ python -m pacman_otm experiment --maze my-mazes --controller nearest-pellet-tour
 | `--controller` | `nearest-pellet` | The controller to test. |
 | `--runs N` | `10`, or the set size | Number of runs. With a maze set, the default is one run per maze; more runs cycle through the set. |
 | `--seed N` | `42` | The **experiment seed**. Run *i* gets its maze seed and controller seed from it. |
-| `--max-steps N` | `1000` | Per run. |
+| `--max-steps N` | `3000` | Per run. |
 | `--name NAME` | `<controller>_<maze>` | Folder name; `_001`, `_002`, … is added if it already exists. |
 | `--output-dir DIR` | `results` | Where the experiment folder goes. |
 | `--visualize` | off | Show every run live in one window. Each run's maze appears in turn. |
@@ -180,6 +180,9 @@ results/nearest-pellet_open-lattice/
 2. Run metrics: `total_steps`, `collected_pellets`, `completion_rate`, …
 3. Maze metrics: `maze_walkable_tiles`, `maze_loops`, `maze_dead_ends`, `maze_junction_share`,
    `maze_longest_straight_run`, `maze_longest_corridor`.
+4. Tour controllers only: `tour_pellets`, `tour_length`, and where reported `tour_lower_bound` (MST),
+   `tour_gap_percent` (at most this far above optimal), `tour_nn_length`, `tour_improvement_percent`
+   (2-opt over nearest neighbour). These are also aggregated under `aggregates.tour_metrics`.
 
 `maze_seed` is the seed that built that run's maze. `mazes show RECIPE --maze-seed <maze_seed>`, with the same
 `--maze-set` overrides, shows it again. Simpler still, every run file holds the full maze: `replay` it.

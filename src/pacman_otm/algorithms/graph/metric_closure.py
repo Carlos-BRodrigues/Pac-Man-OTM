@@ -15,6 +15,10 @@ class MetricClosure:
         self.bfs = BreadthFirstSearch()
         self.metric_closure = None
         self.labels = None
+        # Index -> position: node 0 is the start, then the pellets in (row, col) order.
+        self.nodes: list[Position] = []
+        # The same distances as a float matrix, for the tour algorithms.
+        self.distances: np.ndarray | None = None
 
         self.build_metric_closure()
 
@@ -27,6 +31,7 @@ class MetricClosure:
         nodes = [start, *pellets]
         V = len(nodes)
 
+        self.nodes = nodes
         self.labels = {nodes[i]: i for i in range(V)}
 
         distance_matrix = [[0 for i in range(V)] for j in range(V)]
@@ -68,3 +73,4 @@ class MetricClosure:
                 distance_matrix[i][j] = distance_vector[target]
 
         self.metric_closure = distance_matrix
+        self.distances = np.array(distance_matrix, dtype=float)
