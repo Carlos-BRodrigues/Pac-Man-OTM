@@ -46,8 +46,9 @@ Behaviour worth knowing before changing the CLI:
   recipe `content.ghosts.count`; classic and the starter recipes have 1). A recipe re-places spawns from its ghost
   seed stream; a layout/saved maze keeps its spawns first and adds seeded ones. Tiles and pellets never change.
   `--ghosts 0` plays without ghosts. A ghost catching Pac-Man ends the run as `caught`.
-- `--speeds arcade|equal` (simulate, play, experiment; default `arcade`): time runs in ticks. Arcade: ghosts at
-  15/16 of Pac-Man, each pellet eaten costs him 2/16 of a tile. Equal: one tile per tick for everyone (the game
+- `--speeds easy|arcade|equal` (simulate, play, experiment; default `easy`): time runs in ticks. Easy: ghosts at
+  15/16 of Pac-Man, no pellet cost. Arcade: ghosts at 15/16, each pellet eaten costs him 2/16 of a tile
+  (`SimulationEngine` and `run_experiment` still default to `ARCADE`). Equal: one tile per tick for everyone (the game
   before speeds; the golden `equal` cases pin it). `total_steps` counts ticks, `pacman_moves` tiles.
 - `experiment`: `--seed` is the experiment seed; run i gets maze and controller seeds from
   `derive_run_seeds(seed, i)`, so controllers with the same `--seed` see the same mazes. A recipe without

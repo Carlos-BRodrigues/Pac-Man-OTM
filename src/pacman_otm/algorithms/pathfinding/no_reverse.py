@@ -112,6 +112,49 @@ class NoReverseSearch:
 
         return None
 
+    def distances_from(
+        self,
+        start: Position,
+        heading: Action | None,
+    ) -> dict[Position, int]:
+        """
+        The legal distance in tiles from `start`, entered moving `heading` (None:
+        any first move), to every reachable tile; `start` itself is 0. One
+        breadth-first search over tile x heading states: a tile's distance is the
+        level at which any of its states is first reached.
+        """
+        self.maze.validate_position(start)
+
+        start_tile = self._index[start]
+        successors = self._successors
+        distances = {start: 0}
+        seen = [False] * len(successors)
+        first_moves = self._exits[start_tile] if heading is None else successors[start_tile * 4 + _HEADING[heading]]
+        frontier = []
+
+        for _, state in first_moves:
+            if not seen[state]:
+                seen[state] = True
+                frontier.append(state)
+
+        level = 1
+
+        while frontier:
+            next_frontier = []
+
+            for state in frontier:
+                distances.setdefault(self._positions[state >> 2], level)
+
+                for _, following in successors[state]:
+                    if not seen[following]:
+                        seen[following] = True
+                        next_frontier.append(following)
+
+            frontier = next_frontier
+            level += 1
+
+        return distances
+
     @staticmethod
     def _path(parent: list[int], state: int) -> list[Action]:
         actions = []

@@ -11,7 +11,7 @@ from pacman_otm.simulation.actions import Action
 from pacman_otm.simulation.engine import SimulationEngine
 from pacman_otm.simulation.ghosts import CAUGHT_REASON
 from pacman_otm.simulation.runner import run_simulation
-from pacman_otm.simulation.speeds import ARCADE, EQUAL, SpeedRules, occupied_tile
+from pacman_otm.simulation.speeds import ARCADE, DEFAULT_SPEEDS, EASY, EQUAL, SPEED_PRESETS, SpeedRules, occupied_tile
 
 L, R = Action.LEFT, Action.RIGHT
 
@@ -68,6 +68,19 @@ def test_a_ghost_gains_ground_in_a_corridor_of_dots() -> None:
     assert engine.state.pacman_position == (1, 6 + 32)
     assert engine.state.ghosts[0].position == (1, 1 + 33)
 
+
+
+def test_easy_ghost_loses_ground_even_in_a_corridor_of_dots() -> None:
+    engine = SimulationEngine(corridor(pellets=True), ["blinky"], EASY)
+    run_ticks(engine, 32, R, R)
+
+    # Eating costs nothing: Pac-Man 32 tiles as in an empty corridor, the ghost 30.
+    assert engine.state.pacman_position == (1, 6 + 32)
+    assert engine.state.ghosts[0].position == (1, 1 + 30)
+
+
+def test_easy_is_the_cli_default() -> None:
+    assert SPEED_PRESETS[DEFAULT_SPEEDS] == EASY == SpeedRules(ghost=15, pellet_pause=0)
 
 def test_decisions_only_at_tile_centres() -> None:
     engine = SimulationEngine(corridor(pellets=True), ["blinky"], ARCADE)

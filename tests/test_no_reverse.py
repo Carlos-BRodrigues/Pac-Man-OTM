@@ -107,3 +107,38 @@ def test_paths_are_legal_and_never_shorter_than_bfs(maze_name) -> None:
                         assert search.legal_moves(position_before, previous) == (action,)
 
                     previous = action
+
+
+def test_distances_from_start_and_heading() -> None:
+    search = NoReverseSearch(RING)
+
+    # No heading: both ways round the ring.
+    assert search.distances_from((1, 1), None) == {
+        (1, 1): 0, (1, 2): 1, (1, 3): 2, (2, 1): 1, (3, 1): 2,
+        (2, 3): 3, (3, 2): 3, (3, 3): 4,
+    }
+    # Entered moving UP: going back DOWN is not allowed, so (2, 1) is the far end of the loop.
+    assert search.distances_from((1, 1), U)[(1, 2)] == 1
+    assert search.distances_from((1, 1), U)[(2, 1)] == 7
+
+
+def test_distances_from_turn_back_at_a_dead_end() -> None:
+    search = NoReverseSearch(CORRIDOR)
+
+    # Heading into the dead end at (2, 1): reverse there, then walk the corridor.
+    assert search.distances_from((2, 2), L) == {(2, 2): 0, (2, 1): 1, (2, 3): 3, (2, 4): 4, (2, 5): 5}
+
+
+@pytest.mark.parametrize("maze_name", ["classic", "small"])
+def test_distances_from_match_find_path(maze_name) -> None:
+    maze = create_maze_registry().create(maze_name)
+    search = NoReverseSearch(maze)
+    positions = maze.walkable_positions()
+
+    for start in positions[::7]:
+        for heading in (None, *maze.get_valid_movements(start)):
+            distances = search.distances_from(start, heading)
+
+            for goal in positions:
+                path = search.find_path(start, heading, goal)
+                assert distances.get(goal) == (None if path is None else len(path))

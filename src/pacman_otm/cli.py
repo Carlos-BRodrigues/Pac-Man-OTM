@@ -25,7 +25,7 @@ from pacman_otm.simulation.speeds import DEFAULT_SPEEDS, SPEED_PRESETS, SpeedRul
 from pacman_otm.simulation.runner import DEFAULT_MAX_STEPS, run_simulation
 from pacman_otm.experiments.runner import ExperimentRunner
 
-from pacman_otm.controllers.registry import create_controller_registry
+from pacman_otm.controllers.registry import DEFAULT_CONTROLLER, create_controller_registry
 
 
 from pacman_otm.simulation.result import SimulationResult
@@ -109,7 +109,8 @@ def add_speeds_argument(parser: argparse.ArgumentParser) -> None:
         choices=list(SPEED_PRESETS),
         default=DEFAULT_SPEEDS,
         help=(
-            "Movement speeds. arcade: ghosts at 15/16 of Pac-Man, and every pellet Pac-Man eats slows him "
+            "Movement speeds. easy: ghosts at 15/16 of Pac-Man, no pellet slowdown. "
+            "arcade: ghosts at 15/16 of Pac-Man, and every pellet Pac-Man eats slows him "
             "(a corridor of dots at 16/18). equal: everyone one tile per tick, no pellet slowdown. "
             f"Default: {DEFAULT_SPEEDS}."
         ),
@@ -378,7 +379,7 @@ def main() -> None:
     simulate_parser.add_argument(
         "--controller",
         choices=create_controller_registry().names(),
-        default="nearest-pellet",
+        default=DEFAULT_CONTROLLER,
     )
 
     simulate_parser.add_argument(
@@ -475,7 +476,7 @@ def main() -> None:
     experiment_parser.add_argument(
         "--controller",
         choices=create_controller_registry().names(),
-        default="nearest-pellet",
+        default=DEFAULT_CONTROLLER,
     )
     experiment_parser.add_argument(
         "--visualize",

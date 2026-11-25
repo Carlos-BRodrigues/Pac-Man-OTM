@@ -82,14 +82,15 @@ shortest path to its target that it can drive without reversing, but it can only
 one tile early: as it moves onto a junction, the exit it will take there is already fixed, using where Pac-Man
 was at that moment. A late turn by Pac-Man can therefore juke it.
 
-### `--speeds arcade|equal`
+### `--speeds easy|arcade|equal`
 
 Time runs in **ticks**. A move to the next tile costs 16 units of progress; every tick a mover gains its speed,
 and leftover progress carries into the next tile, so the ratios are exact.
 
 | Preset | Pac-Man | Ghosts | Pellet eaten |
 |---|---|---|---|
-| `arcade` (default) | 16 (1 tile per tick) | 15 (15/16 of Pac-Man) | costs Pac-Man 2 units: a corridor of dots at 16/18 |
+| `easy` (default) | 16 (1 tile per tick) | 15 (15/16 of Pac-Man) | no cost: Pac-Man always outruns a ghost |
+| `arcade` | 16 | 15 | costs Pac-Man 2 units: a corridor of dots at 16/18 |
 | `equal` | 16 | 16 | no cost: the game before speeds existed |
 
 With `arcade`, Pac-Man pulls away from a ghost in a cleared corridor and loses ground while eating. Everyone
@@ -114,9 +115,9 @@ python -m pacman_otm simulate --maze small --controller random-walk --seed 7 --o
 | Option | Default | Meaning |
 |---|---|---|
 | `--maze`, `--maze-seed`, `--maze-set`, `--ghosts` | `classic`, random, the maze's ghosts | See [Choosing a maze](#choosing-a-maze). |
-| `--controller` | `nearest-pellet` | `nearest-pellet`, `random-walk`, or a tour controller over the metric closure: `nearest-pellet-tour`, `two-opt` (nearest neighbour + 2-opt), `held-karp` (optimal, at most 16 pellets). Tour controllers print their tour length, MST lower bound and gap. |
+| `--controller` | `two-opt-avoid` | `nearest-pellet`, `random-walk`, or a tour controller over the metric closure: `nearest-pellet-tour`, `two-opt` (nearest neighbour + 2-opt), `two-opt-avoid` (2-opt tour that flees when a ghost is near its next tiles), `held-karp` (optimal, at most 16 pellets). Tour controllers print their tour length, MST lower bound and gap. |
 | `--seed N` | `42` | Seed for stochastic controllers such as `random-walk`. |
-| `--speeds` | `arcade` | `arcade` or `equal`; see [`--speeds`](#--speeds-arcadeequal). |
+| `--speeds` | `easy` | `easy`, `arcade` or `equal`; see [`--speeds`](#--speeds-easyarcadeequal). |
 | `--max-steps N` | `3500` | Stop after this many ticks. |
 | `--visualize` | off | Show the run live. |
 | `--scale N` | fits the screen | Whole-number pixel scale: each 8×8 tile is drawn N times larger, pixel-exact. Without it the window fills 85% of the screen's height or width (whichever the maze's shape reaches first), so every maze gets a window of about the same size. |
@@ -170,11 +171,11 @@ python -m pacman_otm experiment --maze my-mazes --controller nearest-pellet-tour
 |---|---|---|
 | `--maze`, `--maze-set`, `--ghosts` | `classic`, the maze's ghosts | See [Choosing a maze](#choosing-a-maze). Every controller meets the same ghosts on the same maze. `results.json` counts `caught_runs`; every run record has `ghosts`. |
 | `--maze-seed N` | none | With a recipe: one maze (seed N) for every run. Without it, each run gets its own maze. |
-| `--controller` | `nearest-pellet` | The controller to test. |
+| `--controller` | `two-opt-avoid` | The controller to test. |
 | `--runs N` | `10`, or the set size | Number of runs. With a maze set, the default is one run per maze; more runs cycle through the set. |
 | `--seed N` | `42` | The **experiment seed**. Run *i* gets its maze seed and controller seed from it. |
 | `--max-steps N` | `3500` | Ticks per run. |
-| `--speeds` | `arcade` | See [`--speeds`](#--speeds-arcadeequal); recorded in `results.json`. |
+| `--speeds` | `easy` | See [`--speeds`](#--speeds-easyarcadeequal); recorded in `results.json`. |
 | `--name NAME` | `<controller>_<maze>` | Folder name; `_001`, `_002`, … is added if it already exists. |
 | `--output-dir DIR` | `results` | Where the experiment folder goes. |
 | `--visualize` | off | Show every run live in one window. Each run's maze appears in turn. |

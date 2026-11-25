@@ -51,9 +51,12 @@ class SpeedRules:
 ARCADE = SpeedRules()
 # Everyone at one tile per tick and no pellet pause: the game before speeds existed.
 EQUAL = SpeedRules(ghost=16, pellet_pause=0)
+# Ghosts at 15/16 as in the arcade, but eating costs nothing: Pac-Man always outruns a ghost.
+EASY = SpeedRules(pellet_pause=0)
 
-SPEED_PRESETS: frozendict[str, SpeedRules] = frozendict({"arcade": ARCADE, "equal": EQUAL})
-DEFAULT_SPEEDS = "arcade"
+SPEED_PRESETS: frozendict[str, SpeedRules] = frozendict({"easy": EASY, "arcade": ARCADE, "equal": EQUAL})
+# What the CLI uses without --speeds. The engine and experiment runner keep ARCADE as their own default.
+DEFAULT_SPEEDS = "easy"
 
 
 def mover_point(

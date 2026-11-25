@@ -133,15 +133,26 @@ class TourController(AlgorithmicController):
         target = self.closure.nodes[self.order[self.order_index]]
         self.order_index += 1
 
-        path = self.pathfinder.find_path(self.maze, state.pacman_position, target)
-
         self.current_target = target
+        self._set_plan(state.pacman_position, self.pathfinder.find_path(self.maze, state.pacman_position, target))
+
+    def _repath(self, state: SimulationState) -> None:
+        """
+        A fresh path to the same target from where Pac-Man is now (e.g. after a detour).
+        Unlike _select_next_target it leaves order_index alone, so the target is not skipped.
+        """
+        self._set_plan(
+            state.pacman_position,
+            self.pathfinder.find_path(self.maze, state.pacman_position, self.current_target),
+        )
+
+    def _set_plan(self, start: Position, path: list[Action] | None) -> None:
         self.current_plan = deque(path or [])
         self.path_index = 0
 
         # Build the position sequence only when status is enabled.
         if self._status_collection_enabled and path:
-            position = state.pacman_position
+            position = start
             positions = []
 
             for action in path:
