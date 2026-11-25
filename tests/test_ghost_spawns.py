@@ -135,3 +135,37 @@ def test_recipe_ghost_table_and_overrides() -> None:
 
     with pytest.raises(RecipeError, match="content.ghosts"):
         apply_overrides(recipe, ["content.ghosts.colour=3"])
+
+
+# The default pellet placer: a pellet-free box at the centre of the grid.
+
+
+@pytest.mark.parametrize(
+    ("shape", "box"),
+    [((31, 28), (11, 9, 9, 10)), ((31, 31), (10, 10, 11, 11)), ((11, 11), (3, 3, 5, 5)), ((101, 101), (33, 33, 35, 35))],
+)
+def test_clear_center_box_is_centred_and_scales(shape, box) -> None:
+    from pacman_otm.mazes.generation.content import clear_center_box
+
+    top, left, rows, cols = clear_center_box(*shape)
+    assert (top, left, rows, cols) == box
+    # Centred exactly: equal margins on both sides of each axis.
+    assert top == shape[0] - top - rows
+    assert left == shape[1] - left - cols
+
+
+def test_clear_center_is_the_default_and_leaves_the_centre_empty() -> None:
+    from pacman_otm.mazes.generation.content import clear_center_box
+
+    maze = resolve_maze("organic", maze_seed=4)
+    top, left, rows, cols = clear_center_box(maze.height, maze.width)
+
+    assert load_recipe(RECIPES_DIR / "organic.toml").pellets.name == "clear_center"
+    assert maze.initial_pellets
+    assert not any(top <= row < top + rows and left <= col < left + cols for row, col in maze.initial_pellets)
+    # Everything outside the box has a pellet.
+    outside = {
+        tile for tile in maze.walkable_positions()
+        if not (top <= tile[0] < top + rows and left <= tile[1] < left + cols)
+    } - {maze.pacman_start}
+    assert outside == set(maze.initial_pellets)

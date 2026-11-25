@@ -172,6 +172,25 @@ def ghost_frame_at(milliseconds: int) -> int:
     return milliseconds // GHOST_FRAME_MS % GHOST_FRAMES
 
 
+# Banners for a finished run, shown on its last frame (after the death sequence).
+# Runs stopped from outside (step limit, window closed) get none.
+COMPLETE_MESSAGE = "COMPLETE!"
+GAME_OVER_MESSAGE = "GAME OVER!"
+
+
+def end_message(state: SimulationState) -> str | None:
+    if not state.terminated:
+        return None
+
+    if state.termination_reason == "completed":
+        return COMPLETE_MESSAGE
+
+    if state.termination_reason == CAUGHT_REASON:
+        return GAME_OVER_MESSAGE
+
+    return None
+
+
 # A run that ends with CAUGHT_REASON (a ghost caught Pac-Man) plays the death sequence.
 DEATH_FPS = 8
 

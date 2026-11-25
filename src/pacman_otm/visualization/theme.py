@@ -30,6 +30,8 @@ class Theme:
     gate: Color = (236, 150, 196)
     pellet_color: Color = (255, 214, 192)
     player: Color = (255, 255, 0)
+    # The "GAME OVER!" banner; READY! and COMPLETE! use the player colour.
+    game_over: Color = (255, 60, 60)
     spark: Color = (255, 236, 170)
     text: Color = (225, 230, 240)
     target: Color = (120, 250, 120)

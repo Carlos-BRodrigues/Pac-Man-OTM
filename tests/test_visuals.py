@@ -344,3 +344,29 @@ def test_keyboard_keeps_a_turn_pressed_between_decisions() -> None:
     # ...but the turn is still there when he is next asked, and only once.
     assert keyboard(frame.state) == Action.UP
     assert keyboard(frame.state) is None
+
+
+def test_end_banners() -> None:
+    from pacman_otm.visualization.animation import COMPLETE_MESSAGE, GAME_OVER_MESSAGE, end_message
+
+    state = SimulationEngine(resolve_maze("small")).get_state(0)
+    assert end_message(state) is None
+
+    state.terminated = True
+    for reason, message in (("completed", COMPLETE_MESSAGE), (CAUGHT_REASON, GAME_OVER_MESSAGE), ("max_steps", None)):
+        state.termination_reason = reason
+        assert end_message(state) == message
+
+
+def test_finished_run_shows_no_overlays() -> None:
+    result = _ghost_run()
+    frame = ReplayPlayer(result).last_frame()
+    assert frame.state.terminated and frame.ghost_statuses
+
+    renderer = PygameRenderer(result.maze, scale=1)
+    drawn = []
+    renderer._draw_path_line = lambda path, color: drawn.append(path)
+    renderer.draw(frame)
+    renderer.draw_death(frame, DEATH_FRAMES - 1)
+
+    assert drawn == []

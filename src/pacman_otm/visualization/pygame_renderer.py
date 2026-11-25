@@ -7,7 +7,9 @@ import pygame
 from pacman_otm.mazes.maze import Maze
 from pacman_otm.simulation.frame import SimulationFrame
 from pacman_otm.visualization.animation import (
+    GAME_OVER_MESSAGE,
     INITIAL_POSE,
+    end_message,
     PlayerPose,
     ghost_frame_at,
     ghost_track,
@@ -15,6 +17,7 @@ from pacman_otm.visualization.animation import (
     point_along,
 )
 from pacman_otm.visualization.maze_art import render_maze
+from pacman_otm.visualization.sprites import DEATH_FRAMES
 from pacman_otm.visualization.sprites import SpriteSet
 from pacman_otm.visualization.theme import DEFAULT_THEME, Theme
 
@@ -139,6 +142,8 @@ class PygameRenderer:
         """
         Draw a frame. With previous_frame and progress < 1, the player and the
         ghosts are drawn part-way between the two positions (display only).
+        The last frame of a completed run gets the "COMPLETE!" banner unless
+        another message is given.
         ghost_frame picks the ghosts' hem; by default it follows the clock, so
         ghosts keep moving while the picture holds still.
         """
@@ -149,6 +154,9 @@ class PygameRenderer:
         self._blit_sprite(self.sprites.player(pose.mouth, pose.facing), position)
 
         self._draw_ghosts(frame, previous_frame, progress, ghost_frame)
+
+        if message is None and progress >= 1.0:
+            message = end_message(frame.state)
 
         self._finish(frame, message)
 
@@ -163,6 +171,10 @@ class PygameRenderer:
 
         position = self._tile_pixel(frame.state.pacman_point)
         self._blit_sprite(self.sprites.death[death_index], position)
+
+        # "GAME OVER!" once the death sequence has played.
+        if message is None and death_index == DEATH_FRAMES - 1:
+            message = end_message(frame.state)
 
         self._finish(frame, message)
 
@@ -183,9 +195,12 @@ class PygameRenderer:
             pellets = frame.state.remaining_pellets
 
         self._draw_pellets(pellets)
-        self._draw_planned_path(frame)
-        self._draw_target(frame)
-        self._draw_ghost_overlays(frame)
+
+        # Plans are about the game in progress: a finished run shows none.
+        if not frame.state.terminated:
+            self._draw_planned_path(frame)
+            self._draw_target(frame)
+            self._draw_ghost_overlays(frame)
 
     def _finish(self, frame: SimulationFrame, message: str | None) -> None:
         self._draw_hud(frame)
@@ -304,7 +319,8 @@ class PygameRenderer:
     def _draw_message(self, message: str) -> None:
         """Draw a banner (e.g. "READY!") centred over the maze."""
 
-        text = self.message_font.render(message, True, self.theme.player)
+        color = self.theme.game_over if message == GAME_OVER_MESSAGE else self.theme.player
+        text = self.message_font.render(message, True, color)
         center = (
             self.width // 2,
             self.hud_px + self.maze.height * self.tile_px // 2,

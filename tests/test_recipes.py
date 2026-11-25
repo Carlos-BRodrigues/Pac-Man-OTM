@@ -63,7 +63,7 @@ def test_minimal_recipe_uses_defaults() -> None:
     assert (built.shape.name, built.generator, built.pellets.name, built.start.name) == (
         "rectangle",
         "lattice",
-        "all_corridors",
+        "clear_center",
         "center",
     )
     assert built.rules == ()
@@ -83,7 +83,7 @@ def test_same_seed_same_maze_and_origin_records_everything() -> None:
 
 
 def test_a_different_pellet_placer_keeps_topography_and_start() -> None:
-    base = recipe()
+    base = apply_overrides(recipe(), ["content.pellets.placer=all_corridors"])
     sparse = apply_overrides(base, ["content.pellets.placer=density", "content.pellets.p=0.3"])
 
     for seed in range(5):

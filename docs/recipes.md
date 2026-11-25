@@ -123,7 +123,8 @@ max_repair_rounds = 200
 # [[rules]] tables: none by default (the three hard rules always apply)
 
 [content.pellets]
-placer = "all_corridors"    # all_corridors | density | exclude_near_start
+placer = "clear_center"     # clear_center | all_corridors | density | exclude_near_start
+size = 0                    # clear_center: box width in tiles, 0 = automatic
 
 [content.start]
 placer = "center"           # center | random | layout
@@ -366,6 +367,7 @@ The three **hard rules** always apply to generated mazes; you don't need to list
 
 | `placer` | Extra keys | Meaning |
 |---|---|---|
+| `clear_center` (default) | `size` (default 0: automatic) | A pellet on every corridor tile except a box centred on the grid, so Pac-Man doesn't start surrounded by pellets. Automatic size: a third of the shorter side, made even or odd per axis so the box is exactly centred (9×10 on a 31×28 maze, 11×11 on 31×31, 35×35 on 101×101). |
 | `all_corridors` | none | A pellet on every corridor tile except the start. |
 | `density` | `p` (default 0.5), in (0, 1] | Each corridor tile holds a pellet with probability `p`. |
 | `exclude_near_start` | `distance` (default 3), integer ≥ 0 | Every corridor tile more than `distance` steps from the start. |

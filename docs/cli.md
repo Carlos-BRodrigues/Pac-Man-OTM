@@ -129,7 +129,8 @@ so `replay` needs nothing else.
 
 While visualizing: **T** toggles the controller's target, **P** its planned path, **G** every ghost's path and
 target (light red for Blinky). Close the window to stop. A run ends as `caught` when a ghost catches Pac-Man,
-and the death animation plays.
+and the death animation plays. When a run ends the overlays disappear and a banner shows **COMPLETE!** or
+**GAME OVER!** (also in replays).
 
 ---
 
