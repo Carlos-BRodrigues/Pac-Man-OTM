@@ -2,7 +2,6 @@ from collections import deque
 import heapq
 from typing import Any
 
-from pacman_otm.algorithms.pathfinding.no_reverse import NoReverseSearch
 from pacman_otm.controllers.algorithmic.base import AlgorithmicController
 from pacman_otm.controllers.controller import ControllerAborted
 from pacman_otm.controllers.status import ControllerStatus
@@ -10,13 +9,12 @@ from pacman_otm.mazes.maze import Maze, Position
 from pacman_otm.simulation.actions import Action
 from pacman_otm.simulation.state import SimulationState
 
-# Estado interno de cada fantasma na DP:
-# (posição_atual, direção_atual, próxima_direção_já_comprometida)
-GhostDPState = tuple[Position, Action | None, Action | None]
+# (posição_atual, direção_atual, próxima_direção_comprometida, progresso)
+GhostDPState = tuple[Position, Action | None, Action | None, int]
 
 
 def _mst_lower_bound(pos: Position, remaining: list[Position]) -> int:
-    """Limitante inferior admissível: distância Manhattan até a pastilha mais próxima + MST."""
+    """Limitante inferior admissível: distância Manhattan até a mais próxima + custo da MST."""
     if not remaining:
         return 0
 
@@ -26,7 +24,6 @@ def _mst_lower_bound(pos: Position, remaining: list[Position]) -> int:
     if len(remaining) == 1:
         return dist_to_nearest
 
-    # Algoritmo de Prim em O(k^2) sobre distâncias de Manhattan
     n = len(remaining)
     visited = [False] * n
     min_edge = [10**9] * n
@@ -53,28 +50,28 @@ def _mst_lower_bound(pos: Position, remaining: list[Position]) -> int:
 
 class OptimalDPController(AlgorithmicController):
     """
-    Programação Dinâmica Exata no espaço de estados aumentado (Pac-Man + bitmask
-    de pastilhas + estado exato dos fantasmas com lookahead de 1 casa), com poda
-    admissível A* via Árvore Geradora Mínima (MST) e Horizonte Deslizante (MPC)
-    automático para mapas grandes.
+    Controlador de Programação Dinâmica / A* (MST) com Horizonte Deslizante (MPC),
+    otimizado para execução rápida em Python puro no Pac-Man-OTM.
     """
 
     def __init__(
         self,
         maze: Maze,
         use_astar: bool = False,
-        max_exact_pellets: int = 16,
-        horizon_pellets: int = 8,
+        max_exact_pellets: int = 10,
+        horizon_pellets: int = 5,
+        mpc_max_states: int = 5_000,
+        mpc_fallback_states: int = 2_000,
+        replan_threat_distance: int = 3,
     ) -> None:
         super().__init__()
         self.maze = maze
         self.use_astar = use_astar
         self.max_exact_pellets = max_exact_pellets
         self.horizon_pellets = horizon_pellets
-        self._ghost_search = NoReverseSearch(maze)
-        self._ghost_move_cache: dict[
-            tuple[Position, Action | None, Position], Action
-        ] = {}
+        self.mpc_max_states = mpc_max_states
+        self.mpc_fallback_states = mpc_fallback_states
+        self.replan_threat_distance = replan_threat_distance
         self.reset()
 
     def reset(self) -> None:
@@ -84,7 +81,6 @@ class OptimalDPController(AlgorithmicController):
         self._current_target: Position | None = None
         self.visited_states: int = 0
         self.used_receding_horizon: bool = False
-        self._shadow_ghosts: list[GhostDPState] | None = None
         self.clear_status()
 
     def describe(self) -> dict[str, Any]:
@@ -93,98 +89,159 @@ class OptimalDPController(AlgorithmicController):
             "use_astar": self.use_astar,
             "max_exact_pellets": self.max_exact_pellets,
             "horizon_pellets": self.horizon_pellets,
+            "mpc_max_states": self.mpc_max_states,
+            "mpc_fallback_states": self.mpc_fallback_states,
+            "replan_threat_distance": self.replan_threat_distance,
             "visited_states": self.visited_states,
             "receding_horizon": self.used_receding_horizon,
         }
+
+    def _has_nearby_ghost(
+        self,
+        pos: Position,
+        ghost_states: tuple[GhostDPState, ...],
+    ) -> bool:
+        if not ghost_states:
+            return False
+        px, py = pos
+        return any(
+            abs(px - g[0][0]) + abs(py - g[0][1]) <= self.replan_threat_distance
+            for g in ghost_states
+        )
+
+    def _tile_risk_penalty(
+        self,
+        curr_pos: Position,
+        next_pos: Position,
+        ghost_states: tuple[GhostDPState, ...],
+    ) -> int:
+        penalty = 0
+        for g_pos, g_heading, g_next_heading, _ in ghost_states:
+            dist = abs(next_pos[0] - g_pos[0]) + abs(next_pos[1] - g_pos[1])
+            if dist <= 1:
+                penalty += 6
+            elif dist == 2:
+                penalty += 3
+            elif dist == 3:
+                penalty += 1
+
+            if g_heading is not None:
+                g_dest = self.maze.get_destination(g_pos, g_heading)
+                if next_pos == g_dest or (next_pos == g_pos and g_dest == curr_pos):
+                    penalty += 8
+                elif g_next_heading is not None and self.maze.is_walkable(g_dest):
+                    g_after = self.maze.get_destination(g_dest, g_next_heading)
+                    if next_pos == g_after:
+                        penalty += 4
+        return penalty
+
+    def _next_planned_action_is_safe(
+        self,
+        pos: Position,
+        ghost_states: tuple[GhostDPState, ...],
+    ) -> bool:
+        if not self._plan:
+            return False
+        action = self._plan[0]
+        next_pos = self.maze.get_destination(pos, action)
+        if not self.maze.is_walkable(next_pos):
+            return False
+        if not ghost_states:
+            return True
+        if self._has_nearby_ghost(pos, ghost_states):
+            return not any(next_pos == g[0] for g in ghost_states)
+        return True
 
     def select_action(self, state: SimulationState) -> Action:
         if not state.remaining_pellets:
             raise RuntimeError("No reachable remaining pellets.")
 
+        pos = state.pacman_position
         ghost_dp_states = self._sync_ghost_states(state)
 
-        # Caso 1: Instância tratável globalmente -> resolve uma única vez e segue o plano ótimo
-        if len(state.remaining_pellets) <= self.max_exact_pellets and not self.used_receding_horizon:
-            if not self._plan:
-                actions = self._solve_subset(
-                    state=state,
-                    ghost_states=ghost_dp_states,
-                    target_pellets=sorted(state.remaining_pellets),
-                )
-                self._set_plan(state.pacman_position, actions)
-            return self._consume_next_action(state)
+        if self._next_planned_action_is_safe(pos, ghost_dp_states):
+            return self._consume_next_action()
 
-        # Caso 2: Mapa grande (ex: classic) -> Horizonte Deslizante (MPC) sobre as H mais próximas
-        self.used_receding_horizon = True
-        if not self._plan or bool(ghost_dp_states):
-            px, py = state.pacman_position
-            nearest_subset = sorted(
-                state.remaining_pellets,
-                key=lambda p: (abs(p[0] - px) + abs(p[1] - py), p[0], p[1]),
-            )[: self.horizon_pellets]
-
-            actions = self._solve_mpc_with_fallback(
-                state=state,
+        if (
+            len(state.remaining_pellets) <= self.max_exact_pellets
+            and not self.used_receding_horizon
+        ):
+            actions = self._solve_subset(
+                start_pos=pos,
                 ghost_states=ghost_dp_states,
-                nearest_subset=nearest_subset,
+                target_pellets=sorted(state.remaining_pellets),
             )
-            self._set_plan(state.pacman_position, actions)
+            self._set_plan(pos, actions)
+            return self._consume_next_action()
 
-        return self._consume_next_action(state)
+        self.used_receding_horizon = True
+        px, py = pos
+        nearest_subset = sorted(
+            state.remaining_pellets,
+            key=lambda p: (abs(p[0] - px) + abs(p[1] - py), p[0], p[1]),
+        )[: self.horizon_pellets]
+
+        actions = self._solve_mpc_with_fallback(
+            start_pos=pos,
+            ghost_states=ghost_dp_states,
+            nearest_subset=nearest_subset,
+        )
+        self._set_plan(pos, actions)
+        return self._consume_next_action()
 
     def _solve_mpc_with_fallback(
         self,
-        state: SimulationState,
+        start_pos: Position,
         ghost_states: tuple[GhostDPState, ...],
         nearest_subset: list[Position],
     ) -> deque[Action]:
-        """Tenta o horizonte local H; se um fantasma bloquear o subconjunto, reduz o horizonte."""
         try:
             return self._solve_subset(
-                state,
-                ghost_states,
-                nearest_subset,
-                max_states=200_000,
+                start_pos=start_pos,
+                ghost_states=ghost_states,
+                target_pellets=nearest_subset,
+                max_states=self.mpc_max_states,
             )
         except ControllerAborted:
             if len(nearest_subset) > 1:
                 try:
                     return self._solve_subset(
-                        state,
-                        ghost_states,
-                        nearest_subset[:1],
-                        max_states=50_000,
+                        start_pos=start_pos,
+                        ghost_states=ghost_states,
+                        target_pellets=nearest_subset[:1],
+                        max_states=self.mpc_fallback_states,
                     )
                 except ControllerAborted:
                     pass
 
-            safe_step = self._best_evasion_step(state, ghost_states)
+            safe_step = self._best_evasion_step(start_pos, ghost_states)
             if safe_step is not None:
                 return deque([safe_step])
             raise
 
     def _best_evasion_step(
         self,
-        state: SimulationState,
+        pos: Position,
         ghost_states: tuple[GhostDPState, ...],
     ) -> Action | None:
-        """Fallback de sobrevivência: escolhe um passo sem colisão que afasta dos fantasmas."""
-        v = state.pacman_position
-        next_ghosts = tuple(
-            self._step_ghost_lookahead(gs, v) for gs in ghost_states
-        )
-        best_action: Action | None = None
-        best_dist = -1
+        valid = self.maze.get_valid_movements(pos)
+        if not valid:
+            return None
+        if not ghost_states:
+            return next(iter(valid.keys()))
 
-        for action, next_v in self.maze.get_valid_movements(v).items():
-            if self._is_collision(v, next_v, ghost_states, next_ghosts):
-                continue
-            min_g_dist = min(
-                abs(next_v[0] - ng[0][0]) + abs(next_v[1] - ng[0][1])
-                for ng in next_ghosts
+        best_action: Action | None = None
+        best_score = -10**9
+
+        for action, next_pos in valid.items():
+            min_dist = min(
+                abs(next_pos[0] - g[0][0]) + abs(next_pos[1] - g[0][1])
+                for g in ghost_states
             )
-            if min_g_dist > best_dist:
-                best_dist = min_g_dist
+            direct_hit = any(next_pos == g[0] for g in ghost_states)
+            score = min_dist * 10 - (500 if direct_hit else 0)
+            if score > best_score:
+                best_score = score
                 best_action = action
 
         return best_action
@@ -205,23 +262,12 @@ class OptimalDPController(AlgorithmicController):
             self._planned_positions = ()
             self._current_target = None
 
-    def _consume_next_action(self, state: SimulationState) -> Action:
+    def _consume_next_action(self) -> Action:
         if not self._plan:
             raise ControllerAborted("no_safe_path")
 
         action = self._plan.popleft()
         self._path_index += 1
-
-        # Avança o rastreador sombra dos fantasmas para manter o compromisso de 1 casa sincronizado
-        if state.ghosts:
-            if self._shadow_ghosts is None:
-                self._shadow_ghosts = [
-                    (g.position, g.direction, None) for g in state.ghosts
-                ]
-            self._shadow_ghosts = [
-                self._step_ghost_lookahead(gs, state.pacman_position)
-                for gs in self._shadow_ghosts
-            ]
 
         if self._status_collection_enabled:
             self._update_status(
@@ -235,109 +281,91 @@ class OptimalDPController(AlgorithmicController):
         return action
 
     def _sync_ghost_states(self, state: SimulationState) -> tuple[GhostDPState, ...]:
-        """
-        Reconstrói (posição, direção_atual, próxima_direção_comprometida) de cada
-        fantasma para que a DP preveja exatamente o movimento do Blinky.
-        """
         if not state.ghosts:
-            self._shadow_ghosts = []
             return ()
 
-        if (
-            self._shadow_ghosts is not None
-            and len(self._shadow_ghosts) == len(state.ghosts)
-            and all(
-                sh[0] == g.position and sh[1] == g.direction
-                for sh, g in zip(self._shadow_ghosts, state.ghosts)
-            )
-        ):
-            return tuple(sorted(self._shadow_ghosts, key=self._ghost_sort_key))
-
         synced: list[GhostDPState] = [
-            (g.position, g.direction, None) for g in state.ghosts
+            (
+                g.position,
+                getattr(g, "heading", None),
+                getattr(g, "next_heading", None),
+                0,
+            )
+            for g in state.ghosts
         ]
-        self._shadow_ghosts = synced
         return tuple(sorted(synced, key=self._ghost_sort_key))
 
     @staticmethod
-    def _ghost_sort_key(gs: GhostDPState) -> tuple[int, int, str, str]:
-        pos, d1, d2 = gs
+    def _ghost_sort_key(gs: GhostDPState) -> tuple[int, int, str, str, int]:
+        pos, h1, h2, prog = gs
         return (
             pos[0],
             pos[1],
-            d1.value if d1 is not None else "",
-            d2.value if d2 is not None else "",
+            h1.value if h1 is not None else "",
+            h2.value if h2 is not None else "",
+            prog,
         )
 
-    def _first_no_reverse_move(
+    def _choose_fast_ghost_move(
         self,
         pos: Position,
         heading: Action | None,
-        target: Position,
-    ) -> Action:
-        """Replica exatamente a escolha de saída do GhostController / Blinky."""
-        key = (pos, heading, target)
-        cached = self._ghost_move_cache.get(key)
-        if cached is not None:
-            return cached
+        pacman_tile: Position,
+    ) -> Action | None:
+        valid = self.maze.get_valid_movements(pos)
+        if not valid:
+            return None
 
-        if heading is None:
-            path = self._ghost_search.find_path(pos, None, target)
-            move = (
-                path[0]
-                if path
-                else self._ghost_search.legal_moves(pos, None)[0]
-            )
-        else:
-            options = self._ghost_search.legal_moves(pos, heading)
-            if len(options) > 1:
-                path = self._ghost_search.find_path(pos, heading, target)
-                move = path[0] if path else options[0]
-            else:
-                move = options[0]
+        candidates = list(valid.items())
+        if heading is not None and len(candidates) > 1:
+            rev = heading.reverse
+            non_rev = [(act, dst) for act, dst in candidates if act != rev]
+            if non_rev:
+                candidates = non_rev
 
-        self._ghost_move_cache[key] = move
-        return move
-
-    def _step_ghost_lookahead(
-        self,
-        g_state: GhostDPState,
-        pacman_pos: Position,
-    ) -> GhostDPState:
-        """
-        Simula 1 turno do Blinky com lookahead: executa `committed` agora e
-        já compromete a saída de `next_g` usando a posição atual `pacman_pos`.
-        """
-        g_pos, g_dir, committed = g_state
-        act = (
-            self._first_no_reverse_move(g_pos, g_dir, pacman_pos)
-            if committed is None
-            else committed
+        px, py = pacman_tile
+        best_act, _ = min(
+            candidates,
+            key=lambda item: abs(item[1][0] - px) + abs(item[1][1] - py),
         )
-        next_g = self.maze.get_destination(g_pos, act)
-        next_committed = self._first_no_reverse_move(next_g, act, pacman_pos)
-        return (next_g, act, next_committed)
+        return best_act
 
-    @staticmethod
-    def _is_collision(
-        pacman_before: Position,
-        pacman_after: Position,
-        ghosts_before: tuple[GhostDPState, ...],
-        ghosts_after: tuple[GhostDPState, ...],
-    ) -> bool:
-        """Mesma regra do SimulationEngine._caught: mesma casa ou troca frontal."""
-        for g_before, g_after in zip(ghosts_before, ghosts_after):
-            gb_pos = g_before[0]
-            ga_pos = g_after[0]
-            if ga_pos == pacman_after or (
-                ga_pos == pacman_before and gb_pos == pacman_after
-            ):
-                return True
-        return False
+    def _step_ghosts_discrete(
+        self,
+        ghost_states: tuple[GhostDPState, ...],
+        pacman_tile: Position,
+    ) -> tuple[GhostDPState, ...]:
+        if not ghost_states:
+            return ()
+
+        moved: list[GhostDPState] = []
+        for pos, heading, next_heading, _ in ghost_states:
+            cur_heading = heading or self._choose_fast_ghost_move(pos, None, pacman_tile)
+            if cur_heading is None:
+                moved.append((pos, None, None, 0))
+                continue
+
+            new_pos = self.maze.get_destination(pos, cur_heading)
+            if not self.maze.is_walkable(new_pos):
+                cur_heading = self._choose_fast_ghost_move(pos, None, pacman_tile)
+                if cur_heading is None:
+                    moved.append((pos, None, None, 0))
+                    continue
+                new_pos = self.maze.get_destination(pos, cur_heading)
+                if not self.maze.is_walkable(new_pos):
+                    moved.append((pos, None, None, 0))
+                    continue
+
+            new_heading = next_heading or self._choose_fast_ghost_move(
+                new_pos, cur_heading, pacman_tile
+            )
+            moved.append((new_pos, new_heading, None, 0))
+
+        return tuple(sorted(moved, key=self._ghost_sort_key))
 
     def _solve_subset(
         self,
-        state: SimulationState,
+        start_pos: Position,
         ghost_states: tuple[GhostDPState, ...],
         target_pellets: list[Position],
         max_states: int | None = None,
@@ -349,8 +377,7 @@ class OptimalDPController(AlgorithmicController):
         if target_mask == 0:
             return deque()
 
-        s0 = (state.pacman_position, 0, ghost_states)
-
+        s0 = (start_pos, 0, ghost_states)
         parent: dict[Any, tuple[Any, Action | None]] = {s0: (None, None)}
         g_cost: dict[Any, int] = {s0: 0}
 
@@ -359,7 +386,7 @@ class OptimalDPController(AlgorithmicController):
         tie = 0
 
         if self.use_astar:
-            h0 = _mst_lower_bound(state.pacman_position, pellet_list)
+            h0 = _mst_lower_bound(start_pos, pellet_list)
             heapq.heappush(heap, (h0, 0, tie, s0))
         else:
             fifo.append(s0)
@@ -382,25 +409,24 @@ class OptimalDPController(AlgorithmicController):
                 goal_state = curr
                 break
 
-            next_ghosts_raw = tuple(
-                self._step_ghost_lookahead(gs, v) for gs in ghosts
-            )
-            next_ghosts = tuple(
-                sorted(next_ghosts_raw, key=self._ghost_sort_key)
-            )
-
             for action, next_v in self.maze.get_valid_movements(v).items():
-                if ghosts and self._is_collision(
-                    v, next_v, ghosts, next_ghosts_raw
-                ):
+                if ghosts and any(next_v == g[0] for g in ghosts):
+                    continue
+
+                next_ghosts = self._step_ghosts_discrete(ghosts, next_v)
+                if next_ghosts and any(next_v == ng[0] for ng in next_ghosts):
                     continue
 
                 next_mask = mask
                 if next_v in pellet_idx:
                     next_mask |= 1 << pellet_idx[next_v]
 
+                risk_penalty = (
+                    self._tile_risk_penalty(v, next_v, ghosts) if ghosts else 0
+                )
+                step_cost = 1 + risk_penalty
                 nxt = (next_v, next_mask, next_ghosts)
-                new_cost = curr_g + 1
+                new_cost = curr_g + step_cost
 
                 if new_cost < g_cost.get(nxt, 10**9):
                     g_cost[nxt] = new_cost
