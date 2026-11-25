@@ -8,6 +8,7 @@ from pacman_otm.mazes.grid import (
     MAX_MAZE_SIZE,
     MIN_MAZE_SIZE,
     components,
+    portal_mask,
     positions,
     walkable_mask,
 )
@@ -63,7 +64,10 @@ class Connected(Rule):
 
 @dataclass(frozen=True)
 class Enclosed(Rule):
-    """No walkable tile 8-adjacent to void or the grid edge: every maze has wall borders."""
+    """
+    No walkable tile 8-adjacent to void or the grid edge: every maze has wall
+    borders. Tunnel mouths (grid.portal_mask) are open on purpose and exempt.
+    """
 
     name = "enclosed"
 
@@ -80,7 +84,8 @@ class Enclosed(Rule):
                     1 + d_col:1 + d_col + width,
                 ]
 
-        exposed = walkable_mask(grid) & near_outside
+        walkable = walkable_mask(grid)
+        exposed = walkable & near_outside & ~portal_mask(walkable)
 
         if not exposed.any():
             return []

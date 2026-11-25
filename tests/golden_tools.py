@@ -4,7 +4,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from pacman_otm.controllers.ghosts.registry import create_ghosts, ghost_lineup
+from pacman_otm.controllers.ghosts.registry import create_ghosts
 from pacman_otm.controllers.registry import create_controller_registry
 from pacman_otm.mazes.maze import Maze
 from pacman_otm.simulation.engine import SimulationEngine
@@ -31,7 +31,7 @@ def maze_factories() -> dict[str, Callable[[], Maze]]:
 
 
 # (golden file name, controller, maze, seed, speeds); a "_blinky" maze runs with
-# the maze's ghosts, the others without any. The "equal" cases are the game
+# one Blinky on the maze's first spawn, the others without ghosts. The "equal" cases are the game
 # before speeds existed and must never change; "arcade" is the default game.
 GOLDEN_CASES = [
     ("nearest-pellet_small", "nearest-pellet", "small", 42, "equal"),
@@ -47,7 +47,8 @@ def run_case(controller_name: str, maze_name: str, seed: int, speeds: str) -> Si
     with_ghosts = maze_name.endswith("_blinky")
     maze = maze_factories()[maze_name.removesuffix("_blinky")]()
     controller = create_controller_registry().create(controller_name, maze, seed)
-    kinds = ghost_lineup(maze) if with_ghosts else ()
+    # Pinned: one Blinky on the maze's first spawn, whatever the default lineup becomes.
+    kinds = ("blinky",) if with_ghosts else ()
 
     return run_simulation(
         engine=SimulationEngine(maze, kinds, SPEED_PRESETS[speeds]),

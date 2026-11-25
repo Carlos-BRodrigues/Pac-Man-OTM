@@ -31,7 +31,9 @@ from pacman_otm.simulation.speeds import EQUAL, SpeedRules
 # Bumped whenever the saved layout changes. 2: maze.origin, maze.dimensions.
 # 3: maze.metrics. 4: ghosts, and the compact layout described in to_dict.
 # 5: ticks and speeds: headings, progress and arrivals per tick, repeated statuses.
-FORMAT_VERSION = 5
+# 6: ghost statuses carry the raw target; arrivals may wrap through a tunnel. 5 still loads.
+FORMAT_VERSION = 6
+READABLE_VERSIONS = (5, 6)
 
 # A status that is the same as the previous tick's (the controller was not asked).
 SAME = "="
@@ -48,6 +50,8 @@ GHOST_STATUS_FIELDS = (
     "decision_col",
     "options",
     "decided",
+    "raw_target_row",
+    "raw_target_col",
 )
 
 
@@ -108,6 +112,8 @@ def _encode_ghost_status(status: GhostStatus | None) -> list[Any] | None:
 
     target = status.target if status.target is not None else (None, None)
     tile = status.decision_tile if status.decision_tile is not None else (None, None)
+    # Null when the raw target is the target itself (always for Blinky): smaller files.
+    raw = (None, None) if status.raw_target in (None, status.target) else status.raw_target
 
     return [
         *target,
@@ -116,6 +122,7 @@ def _encode_ghost_status(status: GhostStatus | None) -> list[Any] | None:
         *tile,
         encode_moves(status.options),
         status.decided,
+        *raw,
     ]
 
 
@@ -123,10 +130,15 @@ def _decode_ghost_status(item: list[Any] | None) -> GhostStatus | None:
     if item is None:
         return None
 
-    target_row, target_col, path, decision, tile_row, tile_col, options, decided = item
+    # Format 5 has no raw target: it was the target (every ghost was a Blinky).
+    target_row, target_col, path, decision, tile_row, tile_col, options, decided, raw_row, raw_col = (
+        item if len(item) == len(GHOST_STATUS_FIELDS) else [*item, None, None]
+    )
+    target = (target_row, target_col) if target_row is not None else None
 
     return GhostStatus(
-        target=(target_row, target_col) if target_row is not None else None,
+        target=target,
+        raw_target=(raw_row, raw_col) if raw_row is not None else target,
         planned_path=decode_path(path),
         decision=decode_move(decision),
         decision_tile=(tile_row, tile_col) if tile_row is not None else None,
@@ -166,10 +178,10 @@ def _decode_ghost_statuses(encoded: list[list[Any]]) -> list[tuple[GhostStatus |
     return steps
 
 
-def _ghost_track(ghost: dict[str, Any], states: int) -> list[GhostState]:
+def _ghost_track(ghost: dict[str, Any], states: int, maze: Maze) -> list[GhostState]:
     """A ghost's state at every tick, from its spawn and per-tick strings."""
 
-    positions = decode_arrivals(tuple(ghost["spawn"]), ghost["moves"])
+    positions = decode_arrivals(tuple(ghost["spawn"]), ghost["moves"], maze)
     headings = decode_optional_moves(ghost["headings"])
     next_headings = decode_optional_moves(ghost["next_headings"])
     progress = ghost["progress"]
@@ -295,7 +307,7 @@ class SimulationResult:
             "termination_reason": self.states[-1].termination_reason,
             "pacman": {
                 "start": list(self.states[0].pacman_position),
-                "moves": encode_arrivals([state.pacman_position for state in self.states]),
+                "moves": encode_arrivals([state.pacman_position for state in self.states], self.maze),
                 "headings": encode_optional_moves([state.pacman_heading for state in self.states]),
                 "progress": [state.pacman_progress for state in self.states],
             },
@@ -310,7 +322,7 @@ class SimulationResult:
                     "kind": ghost.kind,
                     "spawn": list(ghost.position),
                     "controller": self.ghosts[index] if index < len(self.ghosts) else None,
-                    "moves": encode_arrivals([state.ghosts[index].position for state in self.states]),
+                    "moves": encode_arrivals([state.ghosts[index].position for state in self.states], self.maze),
                     "headings": encode_optional_moves([state.ghosts[index].heading for state in self.states]),
                     "next_headings": encode_optional_moves(
                         [state.ghosts[index].next_heading for state in self.states]
@@ -343,10 +355,10 @@ class SimulationResult:
     def from_dict(cls, data: dict[str, Any]) -> SimulationResult:
         version = data.get("format_version")
 
-        if version != FORMAT_VERSION:
+        if version not in READABLE_VERSIONS:
             raise ValueError(
                 f"Unsupported result format version {version!r}; this version of "
-                f"pacman_otm reads version {FORMAT_VERSION}. Re-run the simulation."
+                f"pacman_otm reads versions {', '.join(map(str, READABLE_VERSIONS))}. Re-run the simulation."
             )
 
         maze_data = data.get("maze")
@@ -362,7 +374,7 @@ class SimulationResult:
         actions = decode_optional_moves(data["actions"])
 
         pacman = data["pacman"]
-        positions = decode_arrivals(tuple(pacman["start"]), pacman["moves"])
+        positions = decode_arrivals(tuple(pacman["start"]), pacman["moves"], maze)
         headings = decode_optional_moves(pacman["headings"])
         progress = pacman["progress"]
 
@@ -374,17 +386,25 @@ class SimulationResult:
         for step, row, col in data["pellets_eaten"]:
             eaten.setdefault(step, []).append((row, col))
 
-        ghost_tracks = [_ghost_track(ghost, len(positions)) for ghost in data["ghosts"]]
+        ghost_tracks = [_ghost_track(ghost, len(positions), maze) for ghost in data["ghosts"]]
 
         states = []
         remaining = set(maze.initial_pellets)
+        facing = Action.LEFT
 
         for index, position in enumerate(positions):
             remaining -= set(eaten.get(index, ()))
 
-            state = SimulationState(maze, speeds.move_cost)
+            # Not saved: a decision starts a move exactly when it leads to an open tile (engine.decide_pacman).
+            action = actions[index - 1] if index > 0 else None
+
+            if action is not None and maze.is_walkable(maze.get_destination(positions[index - 1], action)):
+                facing = action
+
+            state = SimulationState(maze, speeds)
             state.pacman_position = position
             state.pacman_heading = headings[index]
+            state.pacman_facing = facing
             state.pacman_progress = progress[index]
             state.remaining_pellets = set(remaining)
             state.steps = index

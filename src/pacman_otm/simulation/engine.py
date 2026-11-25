@@ -48,7 +48,7 @@ class SimulationEngine:
 
     def reset(self) -> None:
 
-        self.state = SimulationState(self.maze, self.speeds.move_cost)
+        self.state = SimulationState(self.maze, self.speeds)
         self.state.ghosts = tuple(
             GhostState(kind=kind, position=spawn)
             for kind, spawn in zip(self.ghost_kinds, self.maze.ghost_spawns)
@@ -85,6 +85,7 @@ class SimulationEngine:
 
         if self.maze.is_walkable(self.maze.get_destination(self.state.pacman_position, action)):
             self.state.pacman_heading = action
+            self.state.pacman_facing = action
         else:
             self.state.pacman_progress = min(self.state.pacman_progress, 0)
 
@@ -101,7 +102,7 @@ class SimulationEngine:
         ghost = self.state.ghosts[index]
 
         if ghost.heading is None:
-            if action not in self.maze.get_valid_movements(ghost.position):
+            if action not in self.maze.ghost_moves(ghost.position):
                 raise RuntimeError(
                     f"Ghost {index} ({ghost.kind}) at {ghost.position} cannot move {action.value}: wall."
                 )
@@ -109,7 +110,7 @@ class SimulationEngine:
             updated = GhostState(kind=ghost.kind, position=ghost.position, heading=action, progress=ghost.progress)
         else:
             tile = self.maze.get_destination(ghost.position, ghost.heading)
-            exits = self.maze.get_valid_movements(tile)
+            exits = self.maze.ghost_moves(tile)
 
             if action not in exits:
                 raise RuntimeError(

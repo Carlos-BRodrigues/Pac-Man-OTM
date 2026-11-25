@@ -37,14 +37,14 @@ class MazeSet:
     def sources(
         self,
         registry: MazeRegistry | None = None,
-        ghost_count: int | None = None,
+        ghost_kinds: tuple[str | None, ...] | None = None,
     ) -> list[MazeSource]:
         registry = registry if registry is not None else create_maze_registry()
         sources = []
 
         for spec in self.specs:
             try:
-                source = resolve_maze_source(spec, registry=registry, ghost_count=ghost_count)
+                source = resolve_maze_source(spec, registry=registry, ghost_kinds=ghost_kinds)
             except MazeSpecError as error:
                 raise MazeSpecError(f"Maze set '{self.name}': {error}") from error
 
@@ -58,9 +58,13 @@ class MazeSet:
 
         return sources
 
-    def build(self, registry: MazeRegistry | None = None, ghost_count: int | None = None) -> list[Maze]:
-        """The set's mazes; ghost_count (--ghosts) gives each that many ghost spawns."""
-        return [source.build() for source in self.sources(registry, ghost_count)]
+    def build(
+        self,
+        registry: MazeRegistry | None = None,
+        ghost_kinds: tuple[str | None, ...] | None = None,
+    ) -> list[Maze]:
+        """The set's mazes; ghost_kinds (--ghosts / --ghost-kinds) gives each one spawn per ghost."""
+        return [source.build() for source in self.sources(registry, ghost_kinds)]
 
 
 def load_maze_set(path: Path) -> MazeSet:

@@ -1,7 +1,7 @@
 """
 The 'mazes' command family and the maze options shared by every command:
 
-    --maze SPEC  --maze-seed N  --maze-set KEY=VALUE ...  --ghosts N
+    --maze SPEC  --maze-seed N  --maze-set KEY=VALUE ...  --ghosts N  --ghost-kinds K,K,...
 
 Wiring and printing only; mazes, rules and recipes do the work.
 """
@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from pacman_otm.cli_types import non_negative_int, positive_int
+from pacman_otm.controllers.ghosts.registry import GHOST_KINDS, default_lineup, parse_lineup
 from pacman_otm.mazes.analysis import analyze
 from pacman_otm.mazes.layout import LAYOUTS_DIR, format_layout
 from pacman_otm.mazes.maze import Maze
@@ -74,11 +75,40 @@ def add_ghosts_option(parser: argparse.ArgumentParser) -> None:
         default=None,
         metavar="N",
         help=(
-            "Number of ghosts (Blinky). Default: the maze's own ghost spawns (a layout's G tiles, "
-            "a recipe's content.ghosts.count). A layout keeps its spawns first; extra ones are placed "
-            "from the maze seed. The tiles and pellets never change. 0 plays without ghosts."
+            "Number of ghosts, cycling Blinky, Pinky, Inky, Clyde. Default: the maze's own ghost spawns "
+            "(a layout's spawn letters, a recipe's content.ghosts.count). A layout keeps its spawns first; "
+            "extra ones are placed from the maze seed. The tiles and pellets never change. 0: no ghosts."
         ),
     )
+    parser.add_argument(
+        "--ghost-kinds",
+        default=None,
+        metavar="K,K,...",
+        help=(
+            f"The ghosts exactly, in order, e.g. blinky,pinky ({', '.join(GHOST_KINDS)}). Each takes a spawn "
+            "marked for its kind first. Inky needs a Blinky. Must match --ghosts if both are given."
+        ),
+    )
+
+
+def ghost_kinds_from_args(args: argparse.Namespace) -> tuple[str, ...] | None:
+    """The lineup asked for by --ghost-kinds or --ghosts; None: the maze's own spawns decide."""
+
+    count = getattr(args, "ghosts", None)
+    text = getattr(args, "ghost_kinds", None)
+
+    if text is None:
+        return default_lineup(count) if count is not None else None
+
+    try:
+        kinds = parse_lineup(text)
+    except ValueError as error:
+        raise MazeSpecError(f"--ghost-kinds: {error}") from error
+
+    if count is not None and count != len(kinds):
+        raise MazeSpecError(f"--ghosts {count} contradicts --ghost-kinds, which names {len(kinds)} ghost(s).")
+
+    return kinds
 
 
 def add_maze_argument(
@@ -118,7 +148,7 @@ def load_maze(spec: str, args: argparse.Namespace) -> tuple[MazeSource, Maze, in
     recipes fail for some seeds; a random seed that fails is replaced by another
     (an explicit --maze-seed is never replaced).
     """
-    source = resolve_maze_source(spec, args.maze_set, ghost_count=getattr(args, "ghosts", None))
+    source = resolve_maze_source(spec, args.maze_set, ghost_kinds=ghost_kinds_from_args(args))
 
     if args.maze_seed is not None or not source.generated:
         seed = args.maze_seed if args.maze_seed is not None else 0
@@ -166,7 +196,7 @@ def experiment_mazes(
     spec: str,
     overrides: list[str] | tuple[str, ...],
     maze_seed: int | None,
-    ghost_count: int | None = None,
+    ghost_kinds: tuple[str, ...] | None = None,
 ) -> ExperimentMazes:
     """
     A recipe without --maze-seed gives every run its own maze, built from the
@@ -177,9 +207,9 @@ def experiment_mazes(
     sets = maze_sets()
 
     if spec in sets:
-        return _maze_set_mazes(sets[spec], overrides, maze_seed, ghost_count)
+        return _maze_set_mazes(sets[spec], overrides, maze_seed, ghost_kinds)
 
-    source = resolve_maze_source(spec, overrides, ghost_count=ghost_count)
+    source = resolve_maze_source(spec, overrides, ghost_kinds=ghost_kinds)
 
     if source.generated and maze_seed is None:
         return ExperimentMazes(
@@ -213,14 +243,14 @@ def _maze_set_mazes(
     maze_set: MazeSet,
     overrides: list[str] | tuple[str, ...],
     maze_seed: int | None,
-    ghost_count: int | None = None,
+    ghost_kinds: tuple[str, ...] | None = None,
 ) -> ExperimentMazes:
     if overrides or maze_seed is not None:
         raise MazeSpecError(
             f"'{maze_set.name}' is a maze set of fixed mazes; --maze-seed and --maze-set do not apply."
         )
 
-    mazes = maze_set.build(ghost_count=ghost_count)
+    mazes = maze_set.build(ghost_kinds=ghost_kinds)
 
     return ExperimentMazes(
         factory=lambda run_index, run_maze_seed: mazes[run_index % len(mazes)],
@@ -386,7 +416,7 @@ def run_mazes_preview(args: argparse.Namespace) -> None:
 
 
 def run_mazes_generate(args: argparse.Namespace) -> None:
-    source = resolve_maze_source(args.recipe, args.maze_set, ghost_count=args.ghosts)
+    source = resolve_maze_source(args.recipe, args.maze_set, ghost_kinds=ghost_kinds_from_args(args))
 
     if not source.generated:
         raise MazeSpecError(f"'{args.recipe}' is a {source.kind}; 'mazes generate' needs a recipe.")
@@ -487,6 +517,7 @@ def save_named_maze(maze: Maze, target: str, as_layout: bool, force: bool) -> Pa
                 pellets=maze.initial_pellets,
                 origin=replace(origin, name=name),
                 ghost_spawns=maze.ghost_spawns,
+                ghost_spawn_kinds=maze.ghost_spawn_kinds,
             ),
             path,
         )

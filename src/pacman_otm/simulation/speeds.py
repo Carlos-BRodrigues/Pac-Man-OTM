@@ -68,6 +68,8 @@ def mover_point(
     """
     Where a mover is, in fractional tiles: its tile, moved `progress` along its
     heading. Negative progress (a pellet pause) and no heading mean the tile centre.
+    Never wrapped: in a tunnel mouth the point runs off the grid (e.g. column -0.4),
+    which is what drawing needs.
     """
     if heading is None or progress <= 0:
         return float(position[0]), float(position[1])
@@ -77,11 +79,23 @@ def mover_point(
     return position[0] + d_row * fraction, position[1] + d_col * fraction
 
 
-def occupied_tile(position: Position, heading: Action | None, progress: int, move_cost: int) -> Position:
-    """The tile a mover counts as being on: its destination once it is halfway there."""
+def occupied_tile(
+    position: Position,
+    heading: Action | None,
+    progress: int,
+    move_cost: int,
+    maze: Maze | None = None,
+) -> Position:
+    """
+    The tile a mover counts as being on: its destination once it is halfway there.
+    With the maze, a destination through a tunnel is the tile on the other side.
+    """
 
     if heading is None or 2 * progress < move_cost:
         return position
+
+    if maze is not None:
+        return maze.get_destination(position, heading)
 
     d_row, d_col = Maze.MOVEMENTS[heading]
     return position[0] + d_row, position[1] + d_col

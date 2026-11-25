@@ -10,13 +10,14 @@ from pacman_otm.controllers.algorithmic.tours.nearest_pellet_tour import (
 )
 from pacman_otm.controllers.algorithmic.tours.two_opt import TwoOptController
 from pacman_otm.controllers.algorithmic.tours.two_opt_avoid import TwoOptAvoidController
+from pacman_otm.controllers.algorithmic.tours.two_opt_safe import TwoOptSafeController
 from pacman_otm.controllers.stochastic.random_walk import RandomWalkController
 from pacman_otm.mazes.maze import Maze
 
 ControllerFactory = Callable[[Maze, int], Controller]
 
 # What simulate and experiment run without --controller.
-DEFAULT_CONTROLLER = "two-opt-avoid"
+DEFAULT_CONTROLLER = "two-opt-safe"
 
 
 class ControllerRegistry:
@@ -80,6 +81,11 @@ def create_controller_registry() -> ControllerRegistry:
     registry.register(
         "two-opt-avoid",
         lambda maze, seed: TwoOptAvoidController(maze),
+    )
+
+    registry.register(
+        "two-opt-safe",
+        lambda maze, seed: TwoOptSafeController(maze),
     )
 
     registry.register(

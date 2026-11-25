@@ -33,3 +33,6 @@ class GhostStatus(ControllerStatus):
     # True when decision_tile is a junction (two or more options), so the
     # decision was a real choice; False when it was forced (corridor, turn, dead end).
     decided: bool = False
+    # The point the ghost aimed at before projection onto a corridor tile (`target`):
+    # may be a wall or off the grid. None in statuses that predate it.
+    raw_target: Position | None = None

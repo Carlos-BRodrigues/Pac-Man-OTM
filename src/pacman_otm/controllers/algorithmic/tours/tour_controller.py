@@ -146,6 +146,25 @@ class TourController(AlgorithmicController):
             self.pathfinder.find_path(self.maze, state.pacman_position, self.current_target),
         )
 
+    def _set_remaining_order(self, state: SimulationState, remaining: list[int]) -> None:
+        """
+        Replace the rest of the tour with `remaining` (closure indices of every
+        pellet still there, in the new order), e.g. after a re-plan. The eaten
+        pellets keep their places in front, so `order` stays a full tour and
+        describe() keeps reporting the original plan. The next decision picks
+        the first target of the new order.
+        """
+        eaten = [index for index in self.order if self.closure.nodes[index] not in state.remaining_pellets]
+
+        if sorted(remaining) != sorted(set(self.order) - set(eaten)):
+            raise ValueError("A new tour order must hold exactly the remaining pellets.")
+
+        self.order = eaten + list(remaining)
+        self.order_index = len(eaten)
+        self.current_target = None
+        self.current_plan = deque()
+        self.planned_path = ()
+
     def _set_plan(self, start: Position, path: list[Action] | None) -> None:
         self.current_plan = deque(path or [])
         self.path_index = 0

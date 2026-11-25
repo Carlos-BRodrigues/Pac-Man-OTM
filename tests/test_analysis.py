@@ -45,9 +45,10 @@ def test_classic_metrics() -> None:
     assert metrics.walkable_tiles == 300
     assert metrics.pellets == 244
     assert metrics.regions == 1
-    # The two tunnel ends: no wrap-around yet.
+    # Grid-level measures see tiles only: the two tunnel ends count as dead ends,
+    # though the maze joins them (Maze.portals). The open mouths are allowed.
     assert metrics.dead_ends == 2
-    assert not metrics.enclosed
+    assert metrics.enclosed
     assert metrics.symmetric_horizontal and not metrics.symmetric_vertical
     assert metrics.largest_corridor_block == 1
 

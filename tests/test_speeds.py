@@ -174,3 +174,28 @@ def test_no_ghost_passes_through_pacman(seed) -> None:
                 after.ghost_occupied(index) == before.pacman_occupied
                 and before.ghost_occupied(index) == after.pacman_occupied
             )
+
+
+@pytest.mark.parametrize("speeds", [EASY, ARCADE, EQUAL])
+def test_controllers_see_the_run_speeds(speeds, tmp_path) -> None:
+    from pacman_otm.controllers.algorithmic.simple.nearest_pellet import NearestPelletController
+    from pacman_otm.simulation.result import SimulationResult
+
+    class SpeedProbe(NearestPelletController):
+        def select_action(self, state):
+            seen.add(state.speeds)
+            return super().select_action(state)
+
+    seen = set()
+    maze = resolve_maze("small", ghost_count=0)
+    result = run_simulation(engine=SimulationEngine(maze, (), speeds), controller=SpeedProbe(maze))
+
+    assert seen == {speeds}
+
+    path = tmp_path / "run.json"
+    result.save_json(path)
+    loaded = SimulationResult.load_json(path)
+
+    assert loaded.speeds == speeds
+    assert {state.speeds for state in loaded.states} == {speeds}
+    assert {state.move_cost for state in loaded.states} == {speeds.move_cost}

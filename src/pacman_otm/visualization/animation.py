@@ -4,7 +4,9 @@ Animation derived from recorded states only.
 Movers are drawn at their continuous position: tile plus progress along the
 heading (see simulation/speeds.py). Between two ticks a mover follows a short
 track, from where it was, through the centre of any tile it arrived on, to
-where it is, so turns are drawn round the corner, never across it.
+where it is, so turns are drawn round the corner, never across it. Through a
+tunnel the track runs off the edge (e.g. column -1) instead of across the maze;
+the renderer draws such points on both sides.
 
 The chomp loop advances once per drawn in-between frame while the player moves,
 a little more than one loop per tile. When the player does not move (blocked by
@@ -58,8 +60,21 @@ def move_direction(previous: Position, current: Position) -> Action | None:
     return _DIRECTIONS.get(offset)
 
 
-def track(previous_point: Point, previous_tile: Position, current_tile: Position, current_point: Point) -> list[Point]:
-    """The way a mover went in one tick: via the centre of the tile it arrived on, if any."""
+def track(
+    previous_point: Point,
+    previous_tile: Position,
+    current_tile: Position,
+    current_point: Point,
+    size: tuple[int, int] | None = None,
+) -> list[Point]:
+    """
+    The way a mover went in one tick: via the centre of the tile it arrived on, if any.
+    With the maze size, a tile reached through a tunnel is unwrapped next to the
+    previous one (off the grid), so the track never crosses the whole maze.
+    """
+    shift = (0, 0) if size is None else wrap_shift(previous_tile, current_tile, size)
+    current_tile = (current_tile[0] + shift[0], current_tile[1] + shift[1])
+    current_point = (current_point[0] + shift[0], current_point[1] + shift[1])
 
     points = [previous_point]
 
@@ -70,8 +85,31 @@ def track(previous_point: Point, previous_tile: Position, current_tile: Position
     return points
 
 
+def wrap_shift(previous: tuple[float, float], current: tuple[float, float], size: tuple[int, int]) -> tuple[int, int]:
+    """What to add to `current` so it lies next to `previous` when they are on opposite edges (a tunnel)."""
+
+    def axis(before: float, after: float, length: int) -> int:
+        if after - before > length / 2:
+            return -length
+        if before - after > length / 2:
+            return length
+        return 0
+
+    return axis(previous[0], current[0], size[0]), axis(previous[1], current[1], size[1])
+
+
+def _size(state: SimulationState) -> tuple[int, int]:
+    return state.maze.height, state.maze.width
+
+
 def pacman_track(previous: SimulationState, current: SimulationState) -> list[Point]:
-    return track(previous.pacman_point, previous.pacman_position, current.pacman_position, current.pacman_point)
+    return track(
+        previous.pacman_point,
+        previous.pacman_position,
+        current.pacman_position,
+        current.pacman_point,
+        _size(current),
+    )
 
 
 def ghost_track(previous: SimulationState, current: SimulationState, index: int) -> list[Point]:
@@ -84,6 +122,7 @@ def ghost_track(previous: SimulationState, current: SimulationState, index: int)
         previous.ghosts[index].position,
         current.ghosts[index].position,
         current.ghost_point(index),
+        _size(current),
     )
 
 
@@ -119,6 +158,24 @@ def point_along(points: list[Point], fraction: float) -> tuple[Point, Action | N
         remaining -= length
 
     return points[-1], direction
+
+
+def track_remainder(points: list[Point], fraction: float) -> list[Point]:
+    """The rest of a track from `fraction` of the way along: that point, then the later corners."""
+
+    total = sum(_length(a, b) for a, b in zip(points, points[1:]))
+    remaining = min(max(fraction, 0.0), 1.0) * total
+
+    for index, (a, b) in enumerate(zip(points, points[1:])):
+        length = _length(a, b)
+
+        if remaining <= length and length > 0:
+            share = remaining / length
+            return [(a[0] + (b[0] - a[0]) * share, a[1] + (b[1] - a[1]) * share), *points[index + 1:]]
+
+        remaining -= length
+
+    return [points[-1]]
 
 
 def _sign(value: float) -> int:

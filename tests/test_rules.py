@@ -88,12 +88,15 @@ _#####
     assert failing_positions(Enclosed(), tiles) == {(1, 1), (3, 0)}
 
 
-def test_classic_fails_only_enclosed_on_the_tunnel_row() -> None:
+def test_classic_passes_the_hard_rules_its_tunnel_mouths_are_exempt() -> None:
     classic = create_maze_registry().create("classic")
-    violations = HARD_RULES.violations(classic.topography)
 
-    assert [violation.rule for violation in violations] == ["enclosed()"]
-    assert violations[0].positions == ((14, 0), (14, 27))
+    assert HARD_RULES.violations(classic.topography) == []
+
+    # Without its partner on the opposite edge, a mouth is just an open edge again.
+    tiles = classic.topography.copy()
+    tiles[14, 27] = Tile.WALL
+    assert failing_positions(Enclosed(), tiles) == {(14, 0)}
 
 
 def test_small_passes_the_hard_rules() -> None:

@@ -64,20 +64,34 @@ Changes one recipe value for this command only, and can be repeated. Some exampl
 Every key and value is described in the [recipe guide](recipes.md#changing-a-recipe-from-the-command-line---maze-set).
 `--maze-set` on a layout or saved maze is an error.
 
-### `--ghosts N`
+### `--ghosts N` and `--ghost-kinds K,K,...`
 
-The number of ghosts. Every ghost is **Blinky**, the red ghost: he targets Pac-Man's tile and catches him by
-ending a step on Pac-Man's tile or by swapping tiles with him head-on (neighbouring tiles are safe). By default a
-maze brings its own ghosts: one per spawn (`G`/`g` in a layout, `content.ghosts.count` in a recipe). `classic` has
-one, above the ghost house, and every starter recipe has one.
+A ghost catches Pac-Man by ending a step on his tile or by swapping tiles with him head-on (neighbouring tiles are
+safe). There are four kinds. They all move the same way and differ only in where they aim:
 
-- `--ghosts 0` plays without ghosts.
-- On a recipe, `--ghosts N` sets `content.ghosts.count`: the same seed gives the same corridors and pellets, with
-  N spawns at least `content.ghosts.min_distance` steps from the start.
-- On a layout or saved maze, its own spawns come first; extra ones are placed at random from `--maze-seed`
-  (default 0), at least 10 steps from the start.
+| Kind | Aims at |
+|---|---|
+| **Blinky** (red) | Pac-Man's tile. |
+| **Pinky** (pink) | 4 tiles ahead of Pac-Man, in the direction he faces (facing up: straight up). |
+| **Inky** (cyan) | Twice the point 2 tiles ahead of Pac-Man, minus Blinky's tile: the two close in from opposite sides. Needs a Blinky in the run. |
+| **Clyde** (orange) | Pac-Man's tile while more than 8 tiles away (straight line); closer, his corner at the bottom left of the map. |
 
-**How ghosts move.** A ghost keeps moving and never turns back, except at a dead end. It always knows the
+A target on a wall or off the map is replaced by the nearest corridor tile; with **G** the overlay shows both.
+
+By default a maze brings its own ghosts, one per spawn: `classic` has Blinky above the ghost house and Pinky, Inky and
+Clyde inside it; every starter recipe has 4 (`content.ghosts.count`); `small` has none.
+
+- `--ghosts N`: N ghosts, cycling Blinky, Pinky, Inky, Clyde (`--ghosts 2` = Blinky and Pinky, 5 = a second Blinky).
+  `--ghosts 0` plays without ghosts.
+- `--ghost-kinds blinky,clyde`: exactly these ghosts, in this order. With `--ghosts` too, the counts must match.
+  Inky without a Blinky is an error.
+- Each ghost starts on a spawn marked for its kind if there is one, then on a spawn for any ghost (or for a kind
+  that is not playing), then on a random tile from `--maze-seed` (default 0), at least 10 steps from the start.
+- On a recipe, the count sets `content.ghosts.count`: the same seed gives the same corridors and pellets.
+
+**How ghosts move.** Ghosts in the house leave through the gate at once; the gate is one way, so no ghost ever
+goes back in, and Pac-Man can never enter. On `classic`, the middle row is a tunnel: leaving the left edge
+arrives on the right and back, for everyone. A ghost keeps moving and never turns back, except at a dead end. It always knows the
 shortest path to its target that it can drive without reversing, but it can only choose at junctions. It decides
 one tile early: as it moves onto a junction, the exit it will take there is already fixed, using where Pac-Man
 was at that moment. A late turn by Pac-Man can therefore juke it.
@@ -114,8 +128,8 @@ python -m pacman_otm simulate --maze small --controller random-walk --seed 7 --o
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--maze`, `--maze-seed`, `--maze-set`, `--ghosts` | `classic`, random, the maze's ghosts | See [Choosing a maze](#choosing-a-maze). |
-| `--controller` | `two-opt-avoid` | `nearest-pellet`, `random-walk`, or a tour controller over the metric closure: `nearest-pellet-tour`, `two-opt` (nearest neighbour + 2-opt), `two-opt-avoid` (2-opt tour that flees when a ghost is near its next tiles), `held-karp` (optimal, at most 16 pellets). Tour controllers print their tour length, MST lower bound and gap. |
+| `--maze`, `--maze-seed`, `--maze-set`, `--ghosts`, `--ghost-kinds` | `classic`, random, the maze's ghosts | See [Choosing a maze](#choosing-a-maze). |
+| `--controller` | `two-opt-safe` | `nearest-pellet`, `random-walk`, or a tour controller over the metric closure: `nearest-pellet-tour`, `two-opt` (nearest neighbour + 2-opt), `two-opt-avoid` (2-opt tour that flees one tile when a ghost is near its next tiles), `two-opt-safe` (2-opt tour with timed danger checks, safe detours, escapes and re-planning), `held-karp` (optimal, at most 16 pellets). Tour controllers print their tour length, MST lower bound and gap. |
 | `--seed N` | `42` | Seed for stochastic controllers such as `random-walk`. |
 | `--speeds` | `easy` | `easy`, `arcade` or `equal`; see [`--speeds`](#--speeds-easyarcadeequal). |
 | `--max-steps N` | `3500` | Stop after this many ticks. |
@@ -129,7 +143,9 @@ python -m pacman_otm simulate --maze small --controller random-walk --seed 7 --o
 so `replay` needs nothing else.
 
 While visualizing: **T** toggles the controller's target, **P** its planned path, **G** every ghost's path and
-target (light red for Blinky). Close the window to stop. A run ends as `caught` when a ghost catches Pac-Man,
+target, each in its ghost's colour: the paths run side by side where they share a corridor, each target has its own
+marker shape (Blinky ring, Pinky square, Inky diamond, Clyde cross, shown in the top bar), and a small dot joined to a
+marker is the raw target when it lay on a wall or off the map. Close the window to stop. A run ends as `caught` when a ghost catches Pac-Man,
 and the death animation plays. When a run ends the overlays disappear and a banner shows **COMPLETE!** or
 **GAME OVER!** (also in replays).
 
@@ -169,9 +185,9 @@ python -m pacman_otm experiment --maze my-mazes --controller nearest-pellet-tour
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--maze`, `--maze-set`, `--ghosts` | `classic`, the maze's ghosts | See [Choosing a maze](#choosing-a-maze). Every controller meets the same ghosts on the same maze. `results.json` counts `caught_runs`; every run record has `ghosts`. |
+| `--maze`, `--maze-set`, `--ghosts`, `--ghost-kinds` | `classic`, the maze's ghosts | See [Choosing a maze](#choosing-a-maze). Every controller meets the same ghosts on the same maze. `results.json` counts `caught_runs`; every run record has `ghosts`. |
 | `--maze-seed N` | none | With a recipe: one maze (seed N) for every run. Without it, each run gets its own maze. |
-| `--controller` | `two-opt-avoid` | The controller to test. |
+| `--controller` | `two-opt-safe` | The controller to test. |
 | `--runs N` | `10`, or the set size | Number of runs. With a maze set, the default is one run per maze; more runs cycle through the set. |
 | `--seed N` | `42` | The **experiment seed**. Run *i* gets its maze seed and controller seed from it. |
 | `--max-steps N` | `3500` | Ticks per run. |
@@ -232,8 +248,8 @@ results/nearest-pellet_open-lattice/
 
 ## `replay`
 
-Plays back saved runs, ghosts included. A replay only reads the files; nothing is run again. Result files from
-before speeds (format 4 or older) are rejected: run them again.
+Plays back saved runs, ghosts included, or exports them as videos. A replay only reads the files; nothing is run
+again. Result files from before speeds (format 4 or older) are rejected: run them again.
 
 ```powershell
 python -m pacman_otm replay run.json                                # one result (also looked up in results/)
@@ -261,6 +277,31 @@ python -m pacman_otm replay nearest-pellet_open-lattice --fps 20    # bare names
 | Esc | Quit. |
 
 For experiments, the HUD shows `RUN 3/20` and the window title shows which run folder is playing.
+
+### Exporting videos
+
+With `--export mp4` or `--export gif`, `replay` writes videos of the full runs instead of opening a window, exactly
+as the replay window shows them: every tick with its in-between pictures, the death sequence or end banner, then a
+one-second hold. It needs the [`ffmpeg`](https://ffmpeg.org) executable on `PATH` (Windows: `winget install
+Gyan.FFmpeg`); without it the command says so. The same result always gives the same pictures.
+
+```powershell
+python -m pacman_otm replay two-opt-safe_classic --export mp4             # every run -> results/two-opt-safe_classic/videos/run_0001.mp4, ...
+python -m pacman_otm replay two-opt-safe_classic --export gif --run 3     # only run 3 -> videos/run_0003.gif
+python -m pacman_otm replay run.json --export mp4 --output clip.mp4 --no-overlays
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--export mp4\|gif` | off | Write videos. |
+| `--output PATH` | see below | A file for one run, a folder for several. Without it: an experiment's `videos/` folder (`run_NNNN.<format>`), or next to a result file (`x.json` → `x.mp4`). |
+| `--run N` | every run | Export run N of an experiment (1-based). Repeatable. |
+| `--fps N` | `10` | Ticks per second, as in the window. |
+| `--subframes N` | mp4 `5`, gif `2` | Pictures per tick; the video runs at fps × subframes (50 or 20 pictures/s). For GIFs keep that a divisor of 100. |
+| `--scale N` | mp4 `3`, gif `2` | Pixel scale (whole numbers only, so pixels stay sharp). |
+| `--overlays T,P,G` / `--no-overlays` | all on | Which overlays to draw. |
+
+A long run is long on video too: 3,500 ticks at 10 ticks/s is almost 6 minutes. Raise `--fps` to shorten it.
 
 ---
 
@@ -356,11 +397,17 @@ A layout is a text file with one character per tile. All rows must be the same l
 | space | corridor without a pellet |
 | `P` | Pac-Man's start: a corridor without a pellet. Exactly one is required. |
 | `_` | void: outside the maze, drawn as background |
-| `H`, `-` | ghost house and ghost gate (decorative only) |
-| `G` | ghost spawn: a corridor without a pellet where a ghost starts |
-| `g` | ghost spawn with a pellet |
+| `H`, `-` | ghost house and ghost gate: ghosts only, and the gate lets them out but never back in |
+| `G` | ghost spawn for any ghost: a corridor without a pellet where a ghost starts |
+| `B`, `K`, `I`, `C` | ghost spawn for Blinky, Pinky (`K`: `P` is Pac-Man), Inky, Clyde |
+| `g`, `b`, `k`, `i`, `c` | the same spawns with a pellet |
 
-Ghost *i* starts on the *i*-th spawn, reading row by row.
+A spawn letter next to an `H` (or to such a spawn) lies **inside the ghost house**, as on `classic`:
+`#HIKHCH#` puts Inky, Pinky and Clyde in the house. Upper case only there: the house has no pellets. A gate tile
+must touch the house and lead to a corridor.
+
+A corridor tile on the edge of the grid whose tile on the opposite edge (same row or column) is also a corridor is a
+**tunnel mouth**: moving off the edge arrives on the other side, as on `classic`'s middle row.
 
 The usual way to get a layout: generate a maze you like, save it with `--layout`, then edit it.
 
@@ -370,8 +417,8 @@ The usual way to get a layout: generate a maze you like, save it with `--layout`
 3. `python -m pacman_otm mazes check mine` validates it, then `simulate --maze mine --visualize` plays it.
 
 When a layout loads, it is checked for size (5..101), exactly one `P`, and that every pellet can be reached from
-the start. Errors name the row and column. The hard rules aren't enforced for layouts (`classic` has a tunnel that
-touches the edge), but `mazes check` reports them.
+the start. Errors name the row and column. The hard rules aren't enforced for layouts, but `mazes check` reports them
+(tunnel mouths don't count as open edges).
 
 ---
 

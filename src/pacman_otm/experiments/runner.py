@@ -274,6 +274,8 @@ class ExperimentRunner:
                         else seeds.maze_seed
                     ),
                     "controller_seed": seeds.controller_seed,
+                    # The ghost lineup in spawn order, e.g. "blinky,pinky,inky,clyde".
+                    "ghost_kinds": ",".join(ghost.kind for ghost in result.states[0].ghosts),
                     **result.metrics.to_dict(),
                     **self._maze_metrics(result),
                     **self._tour_metrics(result),

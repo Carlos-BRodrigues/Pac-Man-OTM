@@ -6,9 +6,8 @@ from pacman_otm.visualization.animation import (
     SUBFRAMES,
     ends_in_death,
     poses_for_states,
-    pacman_track,
-    step_poses,
 )
+from pacman_otm.visualization.frames import tick_steps
 from pacman_otm.visualization.pygame_renderer import PygameRenderer
 from pacman_otm.visualization.sprites import DEATH_FRAMES
 
@@ -222,14 +221,7 @@ class ReplayPygameVisualizer:
             return
 
         next_frame = self.replay.get_frame(index + 1)
-        pose = step_poses(self.poses[index], pacman_track(frame.state, next_frame.state))[subframe - 1]
-
-        self.renderer.draw(
-            next_frame,
-            pose,
-            previous_frame=frame,
-            progress=subframe / SUBFRAMES,
-        )
+        self.renderer.draw_step(tick_steps(frame, next_frame, self.poses[index])[subframe - 1])
 
     def _update_caption(self) -> None:
         mode = "Playing" if self.playing else "Paused"

@@ -12,6 +12,7 @@ from pacman_otm.mazes.layout import format_layout, parse_layout
 from pacman_otm.mazes.maze import Maze
 from pacman_otm.mazes.registry import RECIPES_DIR, create_maze_registry, resolve_maze
 from pacman_otm.mazes.serialization import maze_from_dict, maze_to_dict
+from pacman_otm.mazes.tiles import Tile
 
 SPAWN_LAYOUT = (
     "#######\n"
@@ -32,17 +33,19 @@ def test_layout_spawns_in_reading_order_and_round_trip() -> None:
     assert format_layout(maze) == SPAWN_LAYOUT
 
 
-def test_classic_has_one_spawn_above_the_ghost_house() -> None:
+def test_classic_has_blinky_above_the_house_and_three_ghosts_inside() -> None:
     maze = create_maze_registry().create("classic")
 
-    assert maze.ghost_spawns == ((11, 13),)
-    assert analyze(maze).ghost_spawns == 1
+    assert maze.ghost_spawns == ((11, 13), (14, 12), (14, 13), (14, 15))
+    assert maze.ghost_spawn_kinds == ("blinky", "inky", "pinky", "clyde")
+    assert all(maze.topography[spawn] == Tile.GHOST_HOUSE for spawn in maze.ghost_spawns[1:])
+    assert analyze(maze).ghost_spawns == 4
 
 
 @pytest.mark.parametrize(
     ("spawns", "message"),
     [
-        ([(0, 0)], "walkable"),
+        ([(0, 0)], "walk"),
         ([(1, 1)], "start"),
         ([(1, 3), (1, 3)], "distinct"),
     ],
@@ -64,6 +67,9 @@ def test_serialization_keeps_spawns_and_old_mazes_load_without_them() -> None:
     data = maze_to_dict(maze)
 
     assert maze_from_dict(data).ghost_spawns == maze.ghost_spawns
+
+    del data["ghost_spawn_kinds"]
+    assert maze_from_dict(data).ghost_spawn_kinds == (None,) * len(maze.ghost_spawns)
 
     del data["ghost_spawns"]
     assert maze_from_dict(data).ghost_spawns == ()
@@ -103,12 +109,12 @@ def test_layout_keeps_its_own_spawns_first() -> None:
 
     assert with_ghost_count(maze, 0, seed=0).ghost_spawns == ()
 
-    four = with_ghost_count(maze, 4, seed=3)
-    assert four.ghost_spawns[0] == (11, 13)
-    assert len(four.ghost_spawns) == 4
-    assert four.origin.params["ghosts"] == {"count": 4, "seed": 3}
-    assert np.array_equal(four.topography, maze.topography)
-    assert four.initial_pellets == maze.initial_pellets
+    six = with_ghost_count(maze, 6, seed=3)
+    assert six.ghost_spawns[:4] == maze.ghost_spawns
+    assert len(six.ghost_spawns) == 6
+    assert six.origin.params["ghosts"] == {"count": 6, "seed": 3}
+    assert np.array_equal(six.topography, maze.topography)
+    assert six.initial_pellets == maze.initial_pellets
 
 
 @pytest.mark.parametrize("recipe", ["open-lattice", "twisty", "organic"])
@@ -127,7 +133,7 @@ def test_ghost_count_never_changes_topography_start_or_pellets(recipe) -> None:
 def test_recipe_ghost_table_and_overrides() -> None:
     recipe = load_recipe(RECIPES_DIR / "open-lattice.toml")
 
-    assert recipe.ghosts.params["count"] == 1
+    assert recipe.ghosts.params["count"] == 4
     assert recipe.to_dict()["content"]["ghosts"]["placer"] == "random"
 
     changed = apply_overrides(recipe, ["content.ghosts.count=3"])

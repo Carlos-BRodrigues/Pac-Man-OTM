@@ -63,6 +63,23 @@ class BreadthFirstSearch:
 
         return path
 
+    def distances_from(self, maze: Maze, start: Position) -> dict[Position, int]:
+        """The shortest distance in moves from `start` to every reachable tile (start: 0)."""
+
+        maze.validate_position(start)
+        distances = {start: 0}
+        frontier = deque([start])
+
+        while frontier:
+            current = frontier.popleft()
+
+            for neighbor in maze.get_valid_movements(current).values():
+                if neighbor not in distances:
+                    distances[neighbor] = distances[current] + 1
+                    frontier.append(neighbor)
+
+        return distances
+
     def find_path_to_nearest(
         self,
         maze: Maze,

@@ -6,11 +6,9 @@ from pacman_otm.visualization.animation import (
     INITIAL_POSE,
     SUBFRAMES,
     ends_in_death,
-    pacman_track,
-    step_poses,
 )
+from pacman_otm.visualization.frames import death_steps, tick_steps
 from pacman_otm.visualization.pygame_renderer import PygameRenderer
-from pacman_otm.visualization.sprites import DEATH_FRAMES
 
 
 class LivePygameVisualizer:
@@ -69,22 +67,16 @@ class LivePygameVisualizer:
         if not self.renderer.process_events():
             return False
 
-        previous = self._previous_frame
-        poses = step_poses(self._pose, pacman_track(previous.state, frame.state), self.subframes)
+        steps = tick_steps(self._previous_frame, frame, self._pose, self.subframes)
 
-        for index, pose in enumerate(poses, start=1):
-            if index > 1:
+        for index, step in enumerate(steps):
+            if index > 0:
                 pygame.event.pump()
 
-            self.renderer.draw(
-                frame,
-                pose,
-                previous_frame=previous,
-                progress=index / self.subframes,
-            )
+            self.renderer.draw_step(step)
             self.clock.tick(self.fps * self.subframes)
 
-        self._pose = poses[-1]
+        self._pose = steps[-1].pose
         self._previous_frame = frame
 
         if ends_in_death(frame.state):
@@ -93,11 +85,11 @@ class LivePygameVisualizer:
         return self.renderer.is_open
 
     def _play_death(self, frame: SimulationFrame) -> None:
-        for index in range(DEATH_FRAMES):
+        for step in death_steps(frame, self._pose):
             if not self.renderer.process_events():
                 return
 
-            self.renderer.draw_death(frame, index)
+            self.renderer.draw_step(step)
             self.clock.tick(DEATH_FPS)
 
     def _show_ready(self, frame: SimulationFrame) -> bool:

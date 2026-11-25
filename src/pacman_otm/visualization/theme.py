@@ -41,8 +41,15 @@ class Theme:
     highlight_alpha: int = 120
 
     # Ghosts, by kind: the body, and the overlay (path and target) drawn for it.
-    ghost_body: frozendict[str, Color] = frozendict({"blinky": (255, 40, 40)})
-    ghost_overlay: frozendict[str, Color] = frozendict({"blinky": (255, 135, 135)})
+    ghost_body: frozendict[str, Color] = frozendict(
+        {"blinky": (255, 40, 40), "pinky": (250, 130, 205), "inky": (40, 215, 235), "clyde": (255, 160, 50)}
+    )
+    # Distinct from each other, from Pac-Man's green path and from the blue walls.
+    ghost_overlay: frozendict[str, Color] = frozendict(
+        {"blinky": (255, 95, 95), "pinky": (255, 160, 230), "inky": (90, 230, 255), "clyde": (255, 190, 90)}
+    )
+    # Under every overlay line, so crossing lines stay readable.
+    overlay_outline: Color = (0, 0, 0)
     ghost_eye: Color = (240, 240, 255)
     ghost_pupil: Color = (40, 60, 220)
     # Spawn stickers: a dim ghost silhouette on each spawn tile, in the colour of

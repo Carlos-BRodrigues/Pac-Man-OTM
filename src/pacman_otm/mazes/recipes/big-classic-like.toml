@@ -46,5 +46,5 @@ placer = "center"
 
 [content.ghosts]
 placer = "random"
-count = 1                # ghost spawns; --ghosts N overrides
-min_distance = 10        # BFS steps from the start
+count = 4                # ghost spawns (Blinky, Pinky, Inky, Clyde); --ghosts N overrides
+min_distance = 10     # BFS steps from the start

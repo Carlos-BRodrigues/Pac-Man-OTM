@@ -30,7 +30,8 @@ class NoReverseSearch:
 
     def __init__(self, maze: Maze) -> None:
         self.maze = maze
-        self._positions: list[Position] = maze.walkable_positions()
+        # The ghosts' graph: it is how ghosts move (house and one-way gate included).
+        self._positions: list[Position] = maze.ghost_positions()
         self._index = {position: index for index, position in enumerate(self._positions)}
 
         # State = tile index * 4 + heading (the move that arrived there).
@@ -42,7 +43,7 @@ class NoReverseSearch:
         for position in self._positions:
             moves = [
                 (_HEADING[action], self._index[destination] * 4 + _HEADING[action])
-                for action, destination in maze.get_valid_movements(position).items()
+                for action, destination in maze.ghost_moves(position).items()
             ]
             self._exits.append(moves)
 
@@ -69,8 +70,8 @@ class NoReverseSearch:
         constraint on the first move), to `goal`; [] when already there, None if
         the goal cannot be reached.
         """
-        self.maze.validate_position(start)
-        self.maze.validate_position(goal)
+        self.maze.validate_ghost_position(start)
+        self.maze.validate_ghost_position(goal)
 
         if start == goal:
             return []
@@ -123,7 +124,7 @@ class NoReverseSearch:
         breadth-first search over tile x heading states: a tile's distance is the
         level at which any of its states is first reached.
         """
-        self.maze.validate_position(start)
+        self.maze.validate_ghost_position(start)
 
         start_tile = self._index[start]
         successors = self._successors

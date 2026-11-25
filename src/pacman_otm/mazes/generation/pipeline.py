@@ -7,6 +7,7 @@ keeps the topography and the start, other rules keep the shape, and the number
 of ghosts changes only the ghost spawns.
 """
 
+from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any
 
@@ -25,6 +26,8 @@ from pacman_otm.mazes.generation.shapes import region_mask
 from pacman_otm.mazes.layout import LAYOUTS_DIR
 from pacman_otm.mazes.maze import Maze
 from pacman_otm.mazes.origin import MazeOrigin, package_version
+
+Position = tuple[int, int]
 
 
 class SeedStreams:
@@ -106,31 +109,88 @@ def build_maze(recipe: MazeRecipe, seed: int) -> Maze:
 
 def with_ghost_count(maze: Maze, count: int, seed: int) -> Maze:
     """
-    The same maze with `count` ghost spawns: its own spawns first (a layout's G
-    tiles, in order), then seeded random ones from the seed's ghost stream. The
-    tiles, start and pellets are unchanged. The origin records count and seed.
+    The same maze with `count` ghost spawns for any ghost: its own spawns first
+    (a layout's spawn letters, in reading order), then seeded random ones from the
+    seed's ghost stream. The tiles, start and pellets are unchanged.
     """
-    if count == len(maze.ghost_spawns):
+    return assign_ghost_spawns(maze, (None,) * count, seed)
+
+
+def assign_ghost_spawns(maze: Maze, kinds: Sequence[str | None], seed: int) -> Maze:
+    """
+    The maze of a run whose ghosts are `kinds` (None: any kind), with ghost i on
+    spawn i. Deterministic, in reading order:
+
+    1. each ghost takes the first unused spawn marked for its own kind;
+    2. ghosts still without one take unused spawns for any ghost, or marked for a
+       kind that is not in this run;
+    3. any left get seeded random spawns from the seed's ghost stream (never on a
+       layout spawn), as with_ghost_count always did: prefix-stable.
+
+    Each spawn is then marked with its ghost's kind (a None ghost keeps the
+    spawn's own mark). Tiles, start and pellets never change; the origin records
+    the count, kinds and seed. Kinds are plain names: mazes know no ghost classes.
+    """
+    spawns = maze.ghost_spawns
+    marks = maze.ghost_spawn_kinds
+    in_run = {kind for kind in kinds if kind is not None}
+    chosen: list[int | None] = [None] * len(kinds)
+    used: set[int] = set()
+
+    def take(ghost: int, fits) -> None:
+        for index, mark in enumerate(marks):
+            if index not in used and fits(mark):
+                chosen[ghost] = index
+                used.add(index)
+                return
+
+    for ghost, kind in enumerate(kinds):
+        if kind is not None:
+            take(ghost, lambda mark, kind=kind: mark == kind)
+
+    for ghost in range(len(kinds)):
+        if chosen[ghost] is None:
+            take(ghost, lambda mark: mark is None or mark not in in_run)
+
+    missing = chosen.count(None)
+    extra: list[Position] = []
+
+    if missing:
+        extra = place_ghost_spawns(
+            maze.topography,
+            maze.pacman_start,
+            SeedStreams(seed).ghosts,
+            count=len(spawns) + missing,
+            fixed=spawns,
+        )[len(spawns):]
+
+    extras = iter(extra)
+    positions, spawn_kinds = [], []
+
+    for ghost, index in enumerate(chosen):
+        positions.append(spawns[index] if index is not None else next(extras))
+        spawn_kinds.append(kinds[ghost] if kinds[ghost] is not None else (marks[index] if index is not None else None))
+
+    if tuple(positions) == spawns and tuple(spawn_kinds) == marks:
         return maze
 
-    spawns = place_ghost_spawns(
-        maze.topography,
-        maze.pacman_start,
-        SeedStreams(seed).ghosts,
-        count=count,
-        fixed=maze.ghost_spawns,
-    )
     origin = maze.origin
 
     if origin is not None:
-        origin = replace(origin, params={**origin.params, "ghosts": {"count": count, "seed": seed}})
+        ghosts = {"count": len(kinds), "seed": seed}
+
+        if in_run:
+            ghosts["kinds"] = list(kinds)
+
+        origin = replace(origin, params={**origin.params, "ghosts": ghosts})
 
     return Maze(
         topography=maze.topography,
         pacman_start=maze.pacman_start,
         pellets=maze.initial_pellets,
         origin=origin,
-        ghost_spawns=spawns,
+        ghost_spawns=positions,
+        ghost_spawn_kinds=spawn_kinds,
     )
 
 

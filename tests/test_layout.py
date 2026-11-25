@@ -25,7 +25,7 @@ def test_legend() -> None:
     maze = parse_layout(
         "######\n"
         "#P.o #\n"
-        "# _H #\n"
+        "# H_ #\n"
         "#.-..#\n"
         "######\n",
         name="legend",
@@ -35,8 +35,8 @@ def test_legend() -> None:
     assert set(maze.initial_pellets) == {(1, 2), (1, 3), (3, 1), (3, 3), (3, 4)}
     assert maze.topography[1, 4] == Tile.CORRIDOR
     assert maze.topography[2, 1] == Tile.CORRIDOR
-    assert maze.topography[2, 2] == Tile.VOID
-    assert maze.topography[2, 3] == Tile.GHOST_HOUSE
+    assert maze.topography[2, 3] == Tile.VOID
+    assert maze.topography[2, 2] == Tile.GHOST_HOUSE
     assert maze.topography[3, 2] == Tile.GHOST_GATE
 
 

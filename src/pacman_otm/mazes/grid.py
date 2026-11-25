@@ -29,6 +29,21 @@ def walkable_mask(grid: np.ndarray) -> np.ndarray:
     return np.isin(grid, _WALKABLE_TILES)
 
 
+def portal_mask(walkable: np.ndarray) -> np.ndarray:
+    """
+    Tunnel mouths: walkable tiles on the grid edge whose tile on the opposite edge
+    (same row, or same column) is walkable too. Maze joins each pair as a move.
+    """
+    mask = np.zeros(walkable.shape, dtype=bool)
+    rows = walkable[:, 0] & walkable[:, -1]
+    cols = walkable[0, :] & walkable[-1, :]
+    mask[:, 0] |= rows
+    mask[:, -1] |= rows
+    mask[0, :] |= cols
+    mask[-1, :] |= cols
+    return mask
+
+
 def tile_mask(grid: np.ndarray, kind: TileKind) -> np.ndarray:
     """'corridor' means walkable; 'wall' and 'void' are those exact tiles."""
 

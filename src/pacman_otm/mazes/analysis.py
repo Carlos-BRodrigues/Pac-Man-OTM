@@ -85,6 +85,26 @@ def start_distances(maze: Maze) -> dict[tuple[int, int], int]:
     return steps
 
 
+def ghost_steps_to_start(maze: Maze, spawn: tuple[int, int]) -> int:
+    """BFS steps a ghost needs from its spawn to Pac-Man's start (out of the house through the gate)."""
+
+    steps = {spawn: 0}
+    frontier = deque([spawn])
+
+    while frontier:
+        current = frontier.popleft()
+
+        if current == maze.pacman_start:
+            return steps[current]
+
+        for neighbour in maze.ghost_moves(current).values():
+            if neighbour not in steps:
+                steps[neighbour] = steps[current] + 1
+                frontier.append(neighbour)
+
+    raise ValueError(f"Ghost spawn {spawn} cannot reach the start.")
+
+
 def analyze(maze: Maze) -> MazeMetrics:
     grid = np.asarray(maze.topography)
     walkable = maze.walkable_mask
@@ -117,7 +137,7 @@ def analyze(maze: Maze) -> MazeMetrics:
         pellets=len(maze.initial_pellets),
         ghost_spawns=len(maze.ghost_spawns),
         nearest_ghost_spawn=(
-            min(start_distances(maze)[spawn] for spawn in maze.ghost_spawns)
+            min(ghost_steps_to_start(maze, spawn) for spawn in maze.ghost_spawns)
             if maze.ghost_spawns
             else None
         ),

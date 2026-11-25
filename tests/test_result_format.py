@@ -79,7 +79,7 @@ def test_replay_frames_carry_ghost_statuses(tmp_path) -> None:
 
 def test_old_versions_are_rejected() -> None:
     data = run("small", "nearest-pellet").to_dict()
-    data["format_version"] = FORMAT_VERSION - 1
+    data["format_version"] = 4
 
     with pytest.raises(ValueError, match="Re-run"):
         SimulationResult.from_dict(json.loads(json.dumps(data)))

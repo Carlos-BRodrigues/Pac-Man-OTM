@@ -1,6 +1,7 @@
 from abc import abstractmethod
 from typing import Any, ClassVar
 
+from pacman_otm.algorithms.graph.nearest import NearestTile
 from pacman_otm.algorithms.pathfinding.no_reverse import NoReverseSearch
 from pacman_otm.controllers.controller import Controller
 from pacman_otm.controllers.status import GhostStatus
@@ -24,6 +25,10 @@ class GhostController(Controller):
       Pac-Man is at that moment, and that choice is final. A player who turns
       after a ghost has committed can juke it.
 
+    Every kind steers the same way; kinds differ only in their target. A target
+    may be any point (a wall, outside the grid): it is projected onto the nearest
+    corridor tile (NearestTile), and the status keeps both.
+
     The engine asks once per tile, and keeps the commitment in the ghost's state
     (GhostState.next_heading), so this controller has no memory of its own. At
     the spawn there is no heading yet: it is asked for a free first move, then
@@ -32,24 +37,32 @@ class GhostController(Controller):
 
     controller_type = "ghost"
     kind: ClassVar[str]
+    # (row side, column side) of this kind's corner, 0 = top/left, 1 = bottom/right. Only Clyde
+    # uses his yet (scatter mode is a later feature).
+    scatter_corner: ClassVar[tuple[int, int]]
 
     def __init__(self, maze: Maze, ghost_index: int) -> None:
         super().__init__()
         self.maze = maze
         self.ghost_index = ghost_index
         self.search = NoReverseSearch(maze)
+        self.nearest = NearestTile(maze)
+        row_side, col_side = self.scatter_corner
+        # Of the map it is on: the corridor tile nearest the grid corner, so odd shapes work too.
+        self.corner = self.nearest((row_side * (maze.height - 1), col_side * (maze.width - 1)))
         self.reset()
 
     @abstractmethod
     def target(self, state: SimulationState) -> Position:
-        """The tile this ghost wants to reach, given the current state."""
+        """The point this ghost wants to reach, given the current state; any integer point."""
 
     def reset(self) -> None:
         self.clear_status()
 
     def select_action(self, state: SimulationState) -> Action:
         ghost = state.ghosts[self.ghost_index]
-        target = self.target(state)
+        raw_target = self.target(state)
+        target = self.nearest(raw_target)
 
         # At the spawn: any first move. Otherwise: the exit of the tile ahead.
         tile, heading = (
@@ -76,6 +89,7 @@ class GhostController(Controller):
             self._update_status(
                 GhostStatus(
                     target=target,
+                    raw_target=raw_target,
                     planned_path=start + self._positions(tile, path or [choice]),
                     decision=choice,
                     decision_tile=tile,

@@ -211,7 +211,7 @@ def legal_ghost_tracks(result, maze) -> None:
     for before, after in zip(result.states, result.states[1:]):
         for ghost_before, ghost_after in zip(before.ghosts, after.ghosts):
             if ghost_before.position != ghost_after.position:
-                exits = maze.get_valid_movements(ghost_before.position)
+                exits = maze.ghost_moves(ghost_before.position)
 
                 # At the spawn the first move is chosen within the tick.
                 if ghost_before.heading is None:
@@ -227,7 +227,7 @@ def legal_ghost_tracks(result, maze) -> None:
                 assert ghost_after.position != ghost_before.position
 
                 if ghost_after.heading == ghost_before.heading.reverse:
-                    assert len(maze.get_valid_movements(ghost_after.position)) == 1
+                    assert len(maze.ghost_moves(ghost_after.position)) == 1
 
 
 @pytest.mark.parametrize("speeds", [EQUAL, ARCADE])
@@ -251,7 +251,7 @@ def test_ghost_tracks_are_legal_over_many_runs(spec, seed, speeds) -> None:
 
 
 def test_blinky_catches_nearest_pellet_on_classic() -> None:
-    maze = resolve_maze("classic")
+    maze = resolve_maze("classic", ghost_kinds=("blinky",))
     kinds = ghost_lineup(maze)
 
     result = run_simulation(

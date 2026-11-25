@@ -7,6 +7,7 @@ from pacman_otm.maze_commands import (
     add_maze_argument,
     add_mazes_parser,
     experiment_mazes,
+    ghost_kinds_from_args,
     load_maze,
     maze_label,
 )
@@ -36,6 +37,7 @@ from pacman_otm.visualization.live import LivePygameVisualizer
 from pacman_otm.visualization.replay import ReplayPygameVisualizer
 from pacman_otm.visualization.keyboard import PygameKeyboardInput
 from pacman_otm.visualization.sprite_preview import run_sprite_preview
+from pacman_otm.visualization.export import FORMAT_DEFAULTS, ExportError, ExportSettings, export_run
 
 RESULTS_DIR = Path("results")
 
@@ -98,7 +100,7 @@ def describe_tour(tour: dict | None) -> str:
 
 
 def create_engine_and_ghosts(maze: Maze, speeds: SpeedRules) -> tuple[SimulationEngine, list[GhostController]]:
-    """The maze's ghosts (one Blinky per ghost spawn): an engine that places them and their controllers."""
+    """The maze's ghosts (one per spawn, kinds from ghost_lineup): an engine that places them and their controllers."""
     kinds = ghost_lineup(maze)
     return SimulationEngine(maze, kinds, speeds), create_ghosts(maze, kinds)
 
@@ -190,7 +192,7 @@ def run_play(args: argparse.Namespace) -> None:
 
 
 def run_experiment(args: argparse.Namespace) -> None:
-    mazes = experiment_mazes(args.maze, args.maze_set, args.maze_seed, args.ghosts)
+    mazes = experiment_mazes(args.maze, args.maze_set, args.maze_seed, ghost_kinds_from_args(args))
     name = args.name or f"{args.controller}_{mazes.label}"
 
     if args.runs is None:
@@ -295,6 +297,13 @@ def run_replay(args: argparse.Namespace) -> None:
     except ValueError as error:
         raise MazeSpecError(str(error)) from error
 
+    if args.export is not None or args.output is not None:
+        export_replay(args, input_path, runs)
+        return
+
+    if args.run:
+        raise MazeSpecError("--run selects runs to export; add --export mp4 or --export gif.")
+
     if len(runs) > 1:
         print(
             f"Replaying {len(runs)} runs of '{runs.title}'. "
@@ -312,6 +321,100 @@ def run_replay(args: argparse.Namespace) -> None:
         visualizer.run()
     finally:
         visualizer.close()
+
+
+OVERLAY_LETTERS = frozendict({"T": "show_target", "P": "show_planned_path", "G": "show_ghost_overlays"})
+
+
+def export_replay(args: argparse.Namespace, input_path: Path, runs: ResultSequence) -> None:
+    """
+    Write videos instead of opening a window: every run of an experiment folder (or
+    the --run ones) into EXP/videos/run_NNNN.<format>, a single result file next
+    to itself. --output is a file for one run or a folder for several.
+    """
+    output = Path(args.output) if args.output is not None else None
+    fmt = args.export or (output.suffix.lstrip(".").lower() if output is not None else None)
+
+    if fmt not in FORMAT_DEFAULTS:
+        raise MazeSpecError(f"Choose the video format with --export ({', '.join(FORMAT_DEFAULTS)}).")
+
+    selected = sorted(set(args.run)) if args.run else list(range(1, len(runs) + 1))
+    invalid = [number for number in selected if not 1 <= number <= len(runs)]
+
+    if invalid:
+        raise MazeSpecError(f"--run {invalid[0]}: '{runs.title}' has runs 1 to {len(runs)}.")
+
+    overlays = (
+        set()
+        if args.no_overlays
+        else {letter.strip().upper() for letter in args.overlays.split(",") if letter.strip()}
+        if args.overlays is not None
+        else set(OVERLAY_LETTERS)
+    )
+
+    if overlays - set(OVERLAY_LETTERS):
+        raise MazeSpecError(f"--overlays takes letters from {','.join(OVERLAY_LETTERS)}, e.g. --overlays T,G.")
+
+    subframes, scale = FORMAT_DEFAULTS[fmt]
+    settings = ExportSettings(
+        format=fmt,
+        fps=args.fps,
+        subframes=args.subframes if args.subframes is not None else subframes,
+        scale=args.scale if args.scale is not None else scale,
+        **{field: letter in overlays for letter, field in OVERLAY_LETTERS.items()},
+    )
+
+    if fmt == "gif" and 100 % settings.video_fps:
+        print(
+            f"Note: {settings.video_fps} pictures/s is not a whole number of GIF hundredths; "
+            f"timing will be approximate (e.g. --fps 10 with --subframes 2 or 5)."
+        )
+
+    for number in selected:
+        path = _export_path(input_path, runs, number, fmt, output, single=len(selected) == 1)
+
+        try:
+            result = runs.load(number - 1)
+        except ValueError as error:
+            raise MazeSpecError(f"{runs.paths[number - 1]}: {error}") from error
+
+        print(f"Exporting {runs.label(number - 1)} to {path} ({settings.video_fps} pictures/s, scale {settings.scale}) ...")
+
+        try:
+            summary = export_run(
+                result,
+                path,
+                settings,
+                on_progress=lambda count: print(f"  {count} pictures", end="\r", flush=True),
+            )
+        except ExportError as error:
+            raise MazeSpecError(str(error)) from error
+
+        print(
+            f"\r  {summary.path}: {summary.pictures} pictures, {summary.seconds:.1f} s, "
+            f"{summary.size_bytes / 1_000_000:.1f} MB"
+        )
+
+
+def _export_path(
+    input_path: Path,
+    runs: ResultSequence,
+    number: int,
+    fmt: str,
+    output: Path | None,
+    single: bool,
+) -> Path:
+    result_path = runs.paths[number - 1]
+    folder_input = input_path.is_dir()
+    name = f"{result_path.parent.name}.{fmt}" if folder_input else f"{result_path.stem}.{fmt}"
+
+    if output is None:
+        return (input_path / "videos" / name) if folder_input else result_path.with_suffix(f".{fmt}")
+
+    if single and output.suffix:
+        return output
+
+    return output / name
 
 
 def run_sprites(args: argparse.Namespace) -> None:
@@ -510,7 +613,48 @@ def main() -> None:
         "--fps",
         type=positive_int,
         default=10,
-        help="Initial replay speed.",
+        help="Replay speed in ticks per second (the window's starting speed, and an export's). Default: 10.",
+    )
+    replay_parser.add_argument(
+        "--export",
+        choices=list(FORMAT_DEFAULTS),
+        default=None,
+        help=(
+            "Write a video of each run instead of opening a window (needs ffmpeg on PATH). "
+            "An experiment folder gives EXP/videos/run_NNNN.<format>; a result file x.json gives x.<format>."
+        ),
+    )
+    replay_parser.add_argument(
+        "--output",
+        default=None,
+        metavar="PATH",
+        help="Export: the video file (one run) or the folder for the videos (several runs).",
+    )
+    replay_parser.add_argument(
+        "--run",
+        type=positive_int,
+        action="append",
+        default=[],
+        metavar="N",
+        help="Export only run N of an experiment folder (1-based). Repeatable. Default: every run.",
+    )
+    replay_parser.add_argument(
+        "--subframes",
+        type=positive_int,
+        default=None,
+        metavar="N",
+        help="Export: pictures per tick (video rate = fps x subframes). Default: 5 for mp4, 2 for gif.",
+    )
+    replay_parser.add_argument(
+        "--overlays",
+        default=None,
+        metavar="T,P,G",
+        help="Export: the overlays to draw (T target, P path, G ghosts). Default: all, as the window starts.",
+    )
+    replay_parser.add_argument(
+        "--no-overlays",
+        action="store_true",
+        help="Export: no overlays.",
     )
 
     replay_parser.add_argument(

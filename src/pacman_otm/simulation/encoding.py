@@ -92,8 +92,11 @@ def decode_optional_moves(text: str) -> list[Action | None]:
     return [None if letter == NO_MOVE else decode_moves(letter)[0] for letter in text]
 
 
-def encode_arrivals(positions: list[Position]) -> str:
-    """One letter per tick: the move to the next position, or "." when it stayed."""
+def encode_arrivals(positions: list[Position], maze: Maze | None = None) -> str:
+    """
+    One letter per tick: the move to the next position, or "." when it stayed.
+    With the maze, a move through a tunnel (to the opposite edge) is its move letter too.
+    """
 
     letters = []
 
@@ -105,12 +108,26 @@ def encode_arrivals(positions: list[Position]) -> str:
         elif offset in _OFFSETS:
             letters.append(_OFFSETS[offset])
         else:
-            raise ValueError(f"A mover jumped from {(row, col)} to {(next_row, next_col)} in one tick.")
+            through = next(
+                (
+                    action
+                    for action in Maze.MOVEMENTS
+                    if maze is not None and maze.get_destination((row, col), action) == (next_row, next_col)
+                ),
+                None,
+            )
+
+            if through is None:
+                raise ValueError(f"A mover jumped from {(row, col)} to {(next_row, next_col)} in one tick.")
+
+            letters.append(_LETTERS[through])
 
     return "".join(letters)
 
 
-def decode_arrivals(start: Position, text: str) -> list[Position]:
+def decode_arrivals(start: Position, text: str, maze: Maze | None = None) -> list[Position]:
+    """The positions back from encode_arrivals; the maze resolves moves through tunnels."""
+
     positions = [tuple(start)]
 
     for move in decode_optional_moves(text):
@@ -118,6 +135,8 @@ def decode_arrivals(start: Position, text: str) -> list[Position]:
 
         if move is None:
             positions.append((row, col))
+        elif maze is not None:
+            positions.append(maze.get_destination((row, col), move))
         else:
             d_row, d_col = Maze.MOVEMENTS[move]
             positions.append((row + d_row, col + d_col))

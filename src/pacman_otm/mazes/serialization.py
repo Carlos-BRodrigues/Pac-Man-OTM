@@ -20,6 +20,8 @@ def maze_to_dict(maze: Maze) -> dict[str, Any]:
         ],
         # In order: ghost i starts on spawn i.
         "ghost_spawns": [list(position) for position in maze.ghost_spawns],
+        # The ghost kind each spawn is for (null: any ghost).
+        "ghost_spawn_kinds": list(maze.ghost_spawn_kinds),
     }
 
 
@@ -33,4 +35,6 @@ def maze_from_dict(data: dict[str, Any]) -> Maze:
         origin=MazeOrigin.from_dict(origin_data) if origin_data is not None else None,
         # Mazes saved before ghosts existed have no spawns.
         ghost_spawns=[tuple(position) for position in data.get("ghost_spawns", [])],
+        # Mazes saved before spawn kinds existed: every spawn is for any ghost.
+        ghost_spawn_kinds=data.get("ghost_spawn_kinds"),
     )
