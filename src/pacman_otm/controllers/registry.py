@@ -1,6 +1,6 @@
 from collections.abc import Callable
 
-from pacman_otm.controllers.controller import Controller
+from pacman_otm.controllers.algorithmic.optimal_dp import OptimalDPController
 from pacman_otm.controllers.algorithmic.simple.nearest_pellet import (
     NearestPelletController,
 )
@@ -9,6 +9,7 @@ from pacman_otm.controllers.algorithmic.tours.nearest_pellet_tour import (
     NearestPelletTourController,
 )
 from pacman_otm.controllers.algorithmic.tours.two_opt import TwoOptController
+from pacman_otm.controllers.controller import Controller
 from pacman_otm.controllers.stochastic.random_walk import RandomWalkController
 from pacman_otm.mazes.maze import Maze
 
@@ -71,6 +72,16 @@ def create_controller_registry() -> ControllerRegistry:
     registry.register(
         "two-opt",
         lambda maze, seed: TwoOptController(maze),
+    )
+
+    registry.register(
+        "optimal-dp",
+        lambda maze, seed: OptimalDPController(maze, use_astar=False, max_exact_pellets=14),
+    )
+
+    registry.register(
+        "optimal-astar",
+        lambda maze, seed: OptimalDPController(maze, use_astar=True, max_exact_pellets=16),
     )
 
     registry.register(
