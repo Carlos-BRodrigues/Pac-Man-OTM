@@ -21,6 +21,7 @@ from pacman_otm.controllers.manual.manual import ManualController
 from pacman_otm.mazes.maze import Maze
 from pacman_otm.simulation.engine import SimulationEngine
 from pacman_otm.simulation.ghosts import CAUGHT_REASON
+from pacman_otm.simulation.speeds import DEFAULT_SPEEDS, SPEED_PRESETS, SpeedRules
 from pacman_otm.simulation.runner import DEFAULT_MAX_STEPS, run_simulation
 from pacman_otm.experiments.runner import ExperimentRunner
 
@@ -96,15 +97,28 @@ def describe_tour(tour: dict | None) -> str:
     return text
 
 
-def create_engine_and_ghosts(maze: Maze) -> tuple[SimulationEngine, list[GhostController]]:
+def create_engine_and_ghosts(maze: Maze, speeds: SpeedRules) -> tuple[SimulationEngine, list[GhostController]]:
     """The maze's ghosts (one Blinky per ghost spawn): an engine that places them and their controllers."""
     kinds = ghost_lineup(maze)
-    return SimulationEngine(maze, kinds), create_ghosts(maze, kinds)
+    return SimulationEngine(maze, kinds, speeds), create_ghosts(maze, kinds)
+
+
+def add_speeds_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--speeds",
+        choices=list(SPEED_PRESETS),
+        default=DEFAULT_SPEEDS,
+        help=(
+            "Movement speeds. arcade: ghosts at 15/16 of Pac-Man, and every pellet Pac-Man eats slows him "
+            "(a corridor of dots at 16/18). equal: everyone one tile per tick, no pellet slowdown. "
+            f"Default: {DEFAULT_SPEEDS}."
+        ),
+    )
 
 
 def run_simulate(args: argparse.Namespace) -> None:
     source, maze, maze_seed = load_maze(args.maze, args)
-    engine, ghosts = create_engine_and_ghosts(maze)
+    engine, ghosts = create_engine_and_ghosts(maze, SPEED_PRESETS[args.speeds])
     controller = create_controller(args.controller, maze, args.seed)
 
     visualizer = None
@@ -145,7 +159,7 @@ def run_simulate(args: argparse.Namespace) -> None:
 
 def run_play(args: argparse.Namespace) -> None:
     source, maze, maze_seed = load_maze(args.maze, args)
-    engine, ghosts = create_engine_and_ghosts(maze)
+    engine, ghosts = create_engine_and_ghosts(maze, SPEED_PRESETS[args.speeds])
 
     renderer = PygameRenderer(maze, scale=args.scale)
     # Arcade-style "READY!" hold before Pac-Man starts moving
@@ -188,7 +202,7 @@ def run_experiment(args: argparse.Namespace) -> None:
 
     print(
         f"Experiment '{name}': controller={args.controller}  maze={mazes.label}"
-        f"{per_run}  runs={args.runs}  seed={args.seed}"
+        f"{per_run}  runs={args.runs}  seed={args.seed}  speeds={args.speeds}"
     )
 
     width = len(str(args.runs))
@@ -219,7 +233,7 @@ def run_experiment(args: argparse.Namespace) -> None:
 
         print(
             f"  run {run_index + 1:>{width}}/{args.runs}  "
-            f"steps={metrics.total_steps:>5}  "
+            f"ticks={metrics.total_steps:>5}  moves={metrics.pacman_moves:>5}  "
             f"collected={metrics.completion_rate:>7.1%}  "
             f"{metrics.termination_reason}{maze_text}"
         )
@@ -240,6 +254,7 @@ def run_experiment(args: argparse.Namespace) -> None:
         max_steps=args.max_steps,
         on_run=report_run,
         on_run_start=visualizer,
+        speeds=SPEED_PRESETS[args.speeds],
     )
 
     try:
@@ -264,7 +279,7 @@ def run_experiment(args: argparse.Namespace) -> None:
     if any(run.metrics.ghosts for run in results.runs):
         caught = sum(1 for run in results.runs if run.metrics.termination_reason == CAUGHT_REASON)
         print(f"Caught by a ghost: {caught}/{len(results.runs)}")
-    print(f"Mean steps: {mean_steps:.1f}")
+    print(f"Mean ticks: {mean_steps:.1f}")
     print(f"Output directory: {results.output_dir}")
 
 
@@ -337,7 +352,7 @@ def main() -> None:
         "--max-steps",
         type=positive_int,
         default=DEFAULT_MAX_STEPS,
-        help=f"Stop a run after this many steps. Default: {DEFAULT_MAX_STEPS}.",
+        help=f"Stop a run after this many ticks. Default: {DEFAULT_MAX_STEPS}.",
     )
     simulate_parser.add_argument(
         "--show-history",
@@ -372,6 +387,7 @@ def main() -> None:
         help="Show the simulation live in Pygame.",
     )
 
+    add_speeds_argument(simulate_parser)
     add_scale_argument(simulate_parser)
     simulate_parser.set_defaults(func=run_simulate)
 
@@ -385,7 +401,7 @@ def main() -> None:
         "--max-steps",
         type=positive_int,
         default=DEFAULT_MAX_STEPS,
-        help=f"Stop a run after this many steps. Default: {DEFAULT_MAX_STEPS}.",
+        help=f"Stop a run after this many ticks. Default: {DEFAULT_MAX_STEPS}.",
     )
     play_parser.add_argument(
         "--output",
@@ -398,6 +414,7 @@ def main() -> None:
         action="store_true",
         help="Save the result, auto-named in results/ (manual_<maze>_<timestamp>.json). Default: not saved.",
     )
+    add_speeds_argument(play_parser)
     add_scale_argument(play_parser)
     play_parser.set_defaults(func=run_play)
 
@@ -453,7 +470,7 @@ def main() -> None:
         "--max-steps",
         type=positive_int,
         default=DEFAULT_MAX_STEPS,
-        help=f"Stop a run after this many steps. Default: {DEFAULT_MAX_STEPS}.",
+        help=f"Stop a run after this many ticks. Default: {DEFAULT_MAX_STEPS}.",
     )
     experiment_parser.add_argument(
         "--controller",
@@ -471,6 +488,7 @@ def main() -> None:
         default=30,
         help="Steps per second while visualizing. Default: 30.",
     )
+    add_speeds_argument(experiment_parser)
     add_scale_argument(experiment_parser)
     experiment_parser.set_defaults(func=run_experiment)
 

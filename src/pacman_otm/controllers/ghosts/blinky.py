@@ -3,9 +3,9 @@ from pacman_otm.simulation.state import SimulationState
 
 
 class Blinky(GhostController):
-    """The red ghost: chases Pac-Man directly, targeting his current tile."""
+    """The red ghost: chases Pac-Man directly, targeting the tile he occupies."""
 
     kind = "blinky"
 
     def target(self, state: SimulationState) -> Position:
-        return state.pacman_position
+        return state.pacman_occupied

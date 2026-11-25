@@ -27,7 +27,8 @@ CONTENT_KEYS = ("pellets", "start", "ghosts")
 
 DEFAULT_SHAPE = "rectangle"
 DEFAULT_GENERATOR = "lattice"
-DEFAULT_PELLETS = "all_corridors"
+# Pellets everywhere except a box around the centre of the grid.
+DEFAULT_PELLETS = "clear_center"
 DEFAULT_START = "center"
 # Without a [content.ghosts] table a recipe places no ghost spawns (count 0).
 DEFAULT_GHOSTS = "random"

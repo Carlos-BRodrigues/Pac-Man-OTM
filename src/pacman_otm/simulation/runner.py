@@ -8,8 +8,9 @@ from pacman_otm.simulation.result import SimulationResult
 from pacman_otm.statistics_.metrics import SimulationMetrics
 from pacman_otm.simulation.frame import SimulationFrame
 
-# Steps before a run is stopped ("max_steps"); large saved mazes need well over 1000.
-DEFAULT_MAX_STEPS = 3000
+# Ticks before a run is stopped ("max_steps"); large saved mazes need well over 1000,
+# and pellet pauses make dot-heavy runs about 12% longer than their path.
+DEFAULT_MAX_STEPS = 3500
 
 
 def run_simulation(
@@ -20,10 +21,15 @@ def run_simulation(
     ghosts: Sequence[Controller] = (),
 ) -> SimulationResult:
     """
-    Run until the engine ends the run. Each step, Pac-Man's controller and then
-    every ghost decide on the same state, so all of them move at once. Ghost i
-    controls engine.state.ghosts[i]. controller_time_seconds counts Pac-Man's
-    thinking only; ghosts count in the elapsed time.
+    Run until the engine ends the run, one tick at a time. In each tick, Pac-Man's
+    controller and then every ghost are asked only if their mover is due a
+    decision (once per tile; see SimulationEngine), all on the tick's state, then
+    the engine advances. Ghost i controls engine.state.ghosts[i].
+
+    Each tick records the latest status of every controller (the same object
+    again while it is not asked), so overlays always show the current plan.
+    controller_time_seconds counts Pac-Man's thinking only; ghosts count in the
+    elapsed time.
     """
 
     if len(ghosts) != len(engine.state.ghosts):
@@ -40,6 +46,9 @@ def run_simulation(
     for ghost in ghosts:
         ghost.reset()
 
+    status = None
+    ghost_status: list = [None] * len(ghosts)
+
     start_time = perf_counter()
     controller_time = 0.0
 
@@ -55,24 +64,32 @@ def run_simulation(
             engine.terminate("max_steps")
             break
 
-        decision_start = perf_counter()
+        action = None
 
-        try:
-            action = controller.select_action(engine.state)
-        except ControllerAborted as abort:
-            engine.terminate(abort.reason)
-            break
-        finally:
-            controller_time += perf_counter() - decision_start
+        if engine.pacman_needs_decision():
+            decision_start = perf_counter()
 
-        status = controller.get_status()
+            try:
+                action = controller.select_action(engine.state)
+            except ControllerAborted as abort:
+                engine.terminate(abort.reason)
+                break
+            finally:
+                controller_time += perf_counter() - decision_start
+
+            status = controller.get_status()
+            engine.decide_pacman(action)
+
+        for index, ghost in enumerate(ghosts):
+            # At the spawn a ghost is asked twice: its first move, then the next exit.
+            while engine.ghost_needs_decision(index):
+                engine.decide_ghost(index, ghost.select_action(engine.state))
+                ghost_status[index] = ghost.get_status()
+
         statuses.append(status)
+        ghost_statuses.append(tuple(ghost_status))
 
-        ghost_actions = [ghost.select_action(engine.state) for ghost in ghosts]
-        ghost_status = tuple(ghost.get_status() for ghost in ghosts)
-        ghost_statuses.append(ghost_status)
-
-        engine.step(action, ghost_actions)
+        engine.advance()
 
         if on_frame is not None:
             should_continue = on_frame(
@@ -80,7 +97,7 @@ def run_simulation(
                     state=engine.state.copy(),
                     action=action,
                     status=status,
-                    ghost_statuses=ghost_status,
+                    ghost_statuses=tuple(ghost_status),
                 )
             )
 

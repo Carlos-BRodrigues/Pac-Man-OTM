@@ -118,8 +118,54 @@ def _bfs_steps(walkable: np.ndarray, start: Position) -> dict[Position, int]:
     return steps
 
 
+def clear_center_box(height: int, width: int, size: int = 0) -> tuple[int, int, int, int]:
+    """
+    (top, left, rows, cols) of the pellet-free box: `size` tiles across (0: a
+    third of the shorter side, at least 3), adjusted per axis to the parity of
+    that axis so the box sits exactly on the centre: 9x10 on a 31x28 grid.
+    """
+    target = size if size > 0 else max(3, round(min(height, width) / 3))
+
+    def fit(dimension: int) -> int:
+        cells = target if target % 2 == dimension % 2 else target + 1
+        return min(cells, dimension)
+
+    rows, cols = fit(height), fit(width)
+    return (height - rows) // 2, (width - cols) // 2, rows, cols
+
+
+def pellets_clear_center(
+    grid: np.ndarray,
+    start: Position,
+    rng: np.random.Generator,
+    size: int = 0,
+) -> set[Position]:
+    """
+    Every walkable tile except a box centred on the grid, so a start near the
+    centre is not surrounded by pellets. `size`: the box's width in tiles
+    (0: automatic, a third of the shorter side, e.g. 9 on a classic-sized maze).
+    """
+    if size < 0:
+        raise GenerationError(f"content.pellets.size must be >= 0 (0: automatic), got {size}.")
+
+    top, left, rows, cols = clear_center_box(*grid.shape, size=size)
+    pellets = {
+        (row, col)
+        for row, col in _walkable(grid)
+        if not (top <= row < top + rows and left <= col < left + cols)
+    } - {start}
+
+    if not pellets:
+        raise GenerationError(
+            f"content.pellets: the clear centre ({rows}x{cols}) leaves no pellet; lower content.pellets.size."
+        )
+
+    return pellets
+
+
 PELLET_PLACERS = frozendict(
     {
+        "clear_center": pellets_clear_center,
         "all_corridors": pellets_all_corridors,
         "density": pellets_density,
         "exclude_near_start": pellets_exclude_near_start,

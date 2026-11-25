@@ -14,13 +14,21 @@ CAUGHT_REASON = "caught"
 class GhostState:
     # Which ghost this is, e.g. "blinky": decides its controller and its colour.
     kind: str
+    # The tile it is on, or leaving while progress > 0.
     position: Position
-    # The move that brought it here; None at the spawn, before its first move.
-    direction: Action | None = None
+    # The move in progress out of `position`; None only at the spawn before the first decision.
+    heading: Action | None = None
+    # The exit already chosen for the tile it is moving to (position + heading). Ghosts
+    # decide one tile ahead and cannot change it; None until that decision is made.
+    next_heading: Action | None = None
+    # Units of the move done (see SpeedRules.move_cost).
+    progress: int = 0
 
     def to_dict(self) -> dict:
         return {
             "kind": self.kind,
             "position": self.position,
-            "direction": self.direction.value if self.direction is not None else None,
+            "heading": self.heading.value if self.heading is not None else None,
+            "next_heading": self.next_heading.value if self.next_heading is not None else None,
+            "progress": self.progress,
         }

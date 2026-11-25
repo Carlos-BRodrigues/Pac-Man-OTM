@@ -18,6 +18,7 @@ from pacman_otm.visualization.animation import (
     CAUGHT_REASON,
     INITIAL_POSE,
     PlayerPose,
+    pacman_track,
     poses_for_states,
     step_poses,
 )
@@ -127,7 +128,7 @@ def test_directional_sprites_are_rotations() -> None:
 # Animation
 
 def test_chomp_loop_order_and_facing() -> None:
-    poses = step_poses(INITIAL_POSE, (5, 5), (4, 5), subframes=4)
+    poses = step_poses(INITIAL_POSE, [(5, 5), (4, 5)], subframes=4)
 
     assert [pose.mouth for pose in poses] == [Mouth.HALF, Mouth.WIDE, Mouth.HALF, Mouth.CLOSED]
     assert all(pose.facing == Action.UP for pose in poses)
@@ -140,16 +141,16 @@ def test_stopped_player_can_freeze_on_any_shape() -> None:
     shapes_at_tile_centres = set()
 
     for col in range(10, 2, -1):
-        pose = step_poses(pose, (1, col), (1, col - 1))[-1]
+        pose = step_poses(pose, [(1, col), (1, col - 1)])[-1]
         shapes_at_tile_centres.add(pose.mouth)
-        assert step_poses(pose, (1, col - 1), (1, col - 1))[-1] == pose
+        assert step_poses(pose, [(1, col - 1), (1, col - 1)])[-1] == pose
 
     assert shapes_at_tile_centres == {Mouth.CLOSED, Mouth.HALF, Mouth.WIDE}
 
 
 def test_blocked_player_freezes_and_keeps_facing() -> None:
-    moving = step_poses(INITIAL_POSE, (5, 5), (5, 6))[1]
-    frozen = step_poses(moving, (5, 6), (5, 6))
+    moving = step_poses(INITIAL_POSE, [(5, 5), (5, 6)])[1]
+    frozen = step_poses(moving, [(5, 6), (5, 6)])
 
     assert frozen == [moving] * len(frozen)
     assert moving == PlayerPose(facing=Action.RIGHT, chomp_step=2)
@@ -162,11 +163,7 @@ def test_poses_for_states_matches_stepwise_feeding() -> None:
 
     pose = INITIAL_POSE
     for index in range(1, len(result.states)):
-        pose = step_poses(
-            pose,
-            result.states[index - 1].pacman_position,
-            result.states[index].pacman_position,
-        )[-1]
+        pose = step_poses(pose, pacman_track(result.states[index - 1], result.states[index]))[-1]
         assert poses[index] == pose
 
 
@@ -330,3 +327,46 @@ def test_live_and_replay_visualizers_with_ghosts() -> None:
     for elapsed in (0.0, 30.0, 60.0, 99.0):
         visualizer.elapsed_ms = elapsed
         visualizer._draw()
+
+
+def test_keyboard_keeps_a_turn_pressed_between_decisions() -> None:
+    from pacman_otm.visualization.keyboard import PygameKeyboardInput
+
+    renderer = PygameRenderer(resolve_maze("small"), scale=1)
+    keyboard = PygameKeyboardInput(renderer)
+    frame = SimulationFrame(state=SimulationEngine(renderer.maze).get_state(0))
+
+    # Pressed while Pac-Man is between tiles: the live view drains the queue...
+    pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_UP))
+    renderer.process_events()
+    renderer.draw(frame)
+
+    # ...but the turn is still there when he is next asked, and only once.
+    assert keyboard(frame.state) == Action.UP
+    assert keyboard(frame.state) is None
+
+
+def test_end_banners() -> None:
+    from pacman_otm.visualization.animation import COMPLETE_MESSAGE, GAME_OVER_MESSAGE, end_message
+
+    state = SimulationEngine(resolve_maze("small")).get_state(0)
+    assert end_message(state) is None
+
+    state.terminated = True
+    for reason, message in (("completed", COMPLETE_MESSAGE), (CAUGHT_REASON, GAME_OVER_MESSAGE), ("max_steps", None)):
+        state.termination_reason = reason
+        assert end_message(state) == message
+
+
+def test_finished_run_shows_no_overlays() -> None:
+    result = _ghost_run()
+    frame = ReplayPlayer(result).last_frame()
+    assert frame.state.terminated and frame.ghost_statuses
+
+    renderer = PygameRenderer(result.maze, scale=1)
+    drawn = []
+    renderer._draw_path_line = lambda path, color: drawn.append(path)
+    renderer.draw(frame)
+    renderer.draw_death(frame, DEATH_FRAMES - 1)
+
+    assert drawn == []

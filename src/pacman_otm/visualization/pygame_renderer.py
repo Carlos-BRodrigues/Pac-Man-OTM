@@ -7,12 +7,17 @@ import pygame
 from pacman_otm.mazes.maze import Maze
 from pacman_otm.simulation.frame import SimulationFrame
 from pacman_otm.visualization.animation import (
+    GAME_OVER_MESSAGE,
     INITIAL_POSE,
+    end_message,
     PlayerPose,
     ghost_frame_at,
-    move_direction,
+    ghost_track,
+    pacman_track,
+    point_along,
 )
 from pacman_otm.visualization.maze_art import render_maze
+from pacman_otm.visualization.sprites import DEATH_FRAMES
 from pacman_otm.visualization.sprites import SpriteSet
 from pacman_otm.visualization.theme import DEFAULT_THEME, Theme
 
@@ -98,6 +103,10 @@ class PygameRenderer:
         # Optional text in the middle of the HUD, e.g. "RUN 3/20" in an experiment replay.
         self.hud_label: str | None = None
 
+        # Called with every KEYDOWN the renderer handles (e.g. the keyboard input of
+        # `play`, which buffers turns pressed while Pac-Man is not being asked).
+        self.key_listeners: list = []
+
         self.is_open = True
 
     def _fit_scale(self) -> tuple[int, float]:
@@ -133,6 +142,8 @@ class PygameRenderer:
         """
         Draw a frame. With previous_frame and progress < 1, the player and the
         ghosts are drawn part-way between the two positions (display only).
+        The last frame of a completed run gets the "COMPLETE!" banner unless
+        another message is given.
         ghost_frame picks the ghosts' hem; by default it follows the clock, so
         ghosts keep moving while the picture holds still.
         """
@@ -143,6 +154,9 @@ class PygameRenderer:
         self._blit_sprite(self.sprites.player(pose.mouth, pose.facing), position)
 
         self._draw_ghosts(frame, previous_frame, progress, ghost_frame)
+
+        if message is None and progress >= 1.0:
+            message = end_message(frame.state)
 
         self._finish(frame, message)
 
@@ -155,8 +169,12 @@ class PygameRenderer:
         # The ghosts leave the picture while Pac-Man dies, as in the arcade.
         self._draw_scene(frame, None, 1.0)
 
-        position = self._tile_pixel(frame.state.pacman_position)
+        position = self._tile_pixel(frame.state.pacman_point)
         self._blit_sprite(self.sprites.death[death_index], position)
+
+        # "GAME OVER!" once the death sequence has played.
+        if message is None and death_index == DEATH_FRAMES - 1:
+            message = end_message(frame.state)
 
         self._finish(frame, message)
 
@@ -177,9 +195,12 @@ class PygameRenderer:
             pellets = frame.state.remaining_pellets
 
         self._draw_pellets(pellets)
-        self._draw_planned_path(frame)
-        self._draw_target(frame)
-        self._draw_ghost_overlays(frame)
+
+        # Plans are about the game in progress: a finished run shows none.
+        if not frame.state.terminated:
+            self._draw_planned_path(frame)
+            self._draw_target(frame)
+            self._draw_ghost_overlays(frame)
 
     def _finish(self, frame: SimulationFrame, message: str | None) -> None:
         self._draw_hud(frame)
@@ -204,27 +225,13 @@ class PygameRenderer:
         previous_frame: SimulationFrame | None,
         progress: float,
     ) -> tuple[float, float]:
-        previous = previous_frame.state.pacman_position if previous_frame is not None else None
-        return self._glide(previous, frame.state.pacman_position, progress)
+        """Pac-Man's sprite corner, part-way along his track from the previous frame."""
 
-    def _glide(
-        self,
-        previous: Position | None,
-        current: Position,
-        progress: float,
-    ) -> tuple[float, float]:
-        """Screen position part-way from previous to current (a sprite's tile corner)."""
+        if previous_frame is None or progress >= 1.0:
+            return self._tile_pixel(frame.state.pacman_point)
 
-        if previous is None or progress >= 1.0:
-            return self._tile_pixel(current)
-
-        # Only a one-tile move is interpolated; anything else is drawn in place.
-        if move_direction(previous, current) is None:
-            return self._tile_pixel(current)
-
-        row = previous[0] + (current[0] - previous[0]) * progress
-        col = previous[1] + (current[1] - previous[1]) * progress
-        return self._tile_pixel((row, col))
+        point, _ = point_along(pacman_track(previous_frame.state, frame.state), progress)
+        return self._tile_pixel(point)
 
     def _blit_sprite(self, sprite: pygame.Surface, tile_pixel: tuple[float, float]) -> None:
         offset = self.theme.sprite_offset * self.scale
@@ -262,23 +269,28 @@ class PygameRenderer:
         if ghost_frame is None:
             ghost_frame = ghost_frame_at(pygame.time.get_ticks())
 
-        previous_ghosts = previous_frame.state.ghosts if previous_frame is not None else ()
-
         for index, ghost in enumerate(frame.state.ghosts):
-            previous = previous_ghosts[index].position if index < len(previous_ghosts) else None
-            sprite = self.sprites.ghost(ghost.kind, ghost_frame, ghost.direction)
-            self._blit_sprite(sprite, self._glide(previous, ghost.position, progress))
+            if previous_frame is None or progress >= 1.0:
+                point, direction = frame.state.ghost_point(index), None
+            else:
+                point, direction = point_along(ghost_track(previous_frame.state, frame.state, index), progress)
+
+            sprite = self.sprites.ghost(ghost.kind, ghost_frame, direction or ghost.heading)
+            self._blit_sprite(sprite, self._tile_pixel(point))
 
     def _draw_ghost_overlays(self, frame: SimulationFrame) -> None:
         if not self.show_ghost_overlays:
             return
 
-        for ghost, status in zip(frame.state.ghosts, frame.ghost_statuses):
+        for index, (ghost, status) in enumerate(zip(frame.state.ghosts, frame.ghost_statuses)):
             if status is None:
                 continue
 
             color = self.theme.ghost_overlay[ghost.kind]
-            self._draw_path_line(status.planned_path, color)
+            # From where the ghost is now, along the rest of its planned path.
+            path = status.planned_path
+            ahead = path[path.index(ghost.position) + 1:] if ghost.position in path else path
+            self._draw_path_line((frame.state.ghost_point(index), *ahead), color)
 
             if status.target is not None:
                 # Smaller than Pac-Man's ring, so both show on a shared tile.
@@ -290,7 +302,9 @@ class PygameRenderer:
                     width=self.scale,
                 )
 
-    def _draw_path_line(self, path: tuple[Position, ...], color) -> None:
+    def _draw_path_line(self, path, color) -> None:
+        """A line through tile centres; positions may be fractional (a mover between tiles)."""
+
         if len(path) < 2:
             return
 
@@ -305,7 +319,8 @@ class PygameRenderer:
     def _draw_message(self, message: str) -> None:
         """Draw a banner (e.g. "READY!") centred over the maze."""
 
-        text = self.message_font.render(message, True, self.theme.player)
+        color = self.theme.game_over if message == GAME_OVER_MESSAGE else self.theme.player
+        text = self.message_font.render(message, True, color)
         center = (
             self.width // 2,
             self.hud_px + self.maze.height * self.tile_px // 2,
@@ -319,7 +334,7 @@ class PygameRenderer:
 
         target = frame.status.target
 
-        if target is None or target == frame.state.pacman_position:
+        if target is None or target == frame.state.pacman_occupied:
             return
 
         pygame.draw.circle(
@@ -335,7 +350,7 @@ class PygameRenderer:
         if not self.show_planned_path or frame.status is None:
             return
 
-        if frame.status.target == frame.state.pacman_position:
+        if frame.status.target == frame.state.pacman_occupied:
             return
 
         path = frame.status.planned_path
@@ -406,6 +421,9 @@ class PygameRenderer:
             self.is_open = False
 
         elif event.type == pygame.KEYDOWN:
+            for listener in self.key_listeners:
+                listener(event)
+
             if event.key == pygame.K_t:
                 self.show_target = not self.show_target
 

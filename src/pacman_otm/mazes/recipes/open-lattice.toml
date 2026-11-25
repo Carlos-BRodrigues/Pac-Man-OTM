@@ -33,7 +33,7 @@ size = 5
 rule = "no_diagonal_contact"
 
 [content.pellets]
-placer = "all_corridors"
+placer = "clear_center"    # size = 0: automatic, a third of the shorter side
 
 [content.start]
 placer = "center"

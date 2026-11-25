@@ -14,18 +14,27 @@ from pacman_otm.statistics_.serialization import pretty_json
 from pacman_otm.controllers.controller import ControllerStatus
 from pacman_otm.controllers.status import GhostStatus
 from pacman_otm.simulation.encoding import (
+    decode_arrivals,
     decode_move,
     decode_moves,
+    decode_optional_moves,
     decode_path,
+    encode_arrivals,
     encode_move,
     encode_moves,
+    encode_optional_moves,
     encode_path,
 )
 from pacman_otm.simulation.ghosts import GhostState
+from pacman_otm.simulation.speeds import EQUAL, SpeedRules
 
 # Bumped whenever the saved layout changes. 2: maze.origin, maze.dimensions.
 # 3: maze.metrics. 4: ghosts, and the compact layout described in to_dict.
-FORMAT_VERSION = 4
+# 5: ticks and speeds: headings, progress and arrivals per tick, repeated statuses.
+FORMAT_VERSION = 5
+
+# A status that is the same as the previous tick's (the controller was not asked).
+SAME = "="
 
 Position = tuple[int, int]
 
@@ -43,10 +52,17 @@ GHOST_STATUS_FIELDS = (
 
 
 def _encode_statuses(statuses: list[ControllerStatus | None]) -> list[list[Any] | None]:
-    encoded = []
+    encoded: list[Any] = []
     previous_path: tuple[Position, ...] | None = None
+    previous: ControllerStatus | None = None
 
     for status in statuses:
+        if status is not None and status is previous:
+            encoded.append(SAME)
+            continue
+
+        previous = status
+
         if status is None:
             encoded.append(None)
             previous_path = None
@@ -65,6 +81,10 @@ def _decode_statuses(encoded: list[list[Any] | None]) -> list[ControllerStatus |
     previous_path: tuple[Position, ...] = ()
 
     for item in encoded:
+        if item == SAME:
+            statuses.append(statuses[-1])
+            continue
+
         if item is None:
             statuses.append(None)
             continue
@@ -115,32 +135,66 @@ def _decode_ghost_status(item: list[Any] | None) -> GhostStatus | None:
     )
 
 
-def _ghost_track(maze: Maze, ghost: dict[str, Any], steps: int) -> list[GhostState]:
-    """A ghost's state at every step, from its spawn and move string."""
+def _encode_ghost_statuses(steps: list[tuple[GhostStatus | None, ...]]) -> list[list[Any]]:
+    encoded = []
+    previous: tuple[GhostStatus | None, ...] = ()
 
-    moves = decode_moves(ghost["moves"])
+    for step in steps:
+        encoded.append(
+            [
+                SAME if index < len(previous) and status is not None and status is previous[index]
+                else _encode_ghost_status(status)
+                for index, status in enumerate(step)
+            ]
+        )
+        previous = step
 
-    if len(moves) != steps:
-        raise ValueError(f"Ghost '{ghost['kind']}' has {len(moves)} moves for {steps} steps.")
+    return encoded
 
-    track = [GhostState(kind=ghost["kind"], position=tuple(ghost["spawn"]))]
 
-    for move in moves:
-        track.append(
-            GhostState(
-                kind=ghost["kind"],
-                position=maze.get_destination(track[-1].position, move),
-                direction=move,
+def _decode_ghost_statuses(encoded: list[list[Any]]) -> list[tuple[GhostStatus | None, ...]]:
+    steps: list[tuple[GhostStatus | None, ...]] = []
+
+    for step in encoded:
+        steps.append(
+            tuple(
+                steps[-1][index] if item == SAME else _decode_ghost_status(item)
+                for index, item in enumerate(step)
             )
         )
 
-    return track
+    return steps
+
+
+def _ghost_track(ghost: dict[str, Any], states: int) -> list[GhostState]:
+    """A ghost's state at every tick, from its spawn and per-tick strings."""
+
+    positions = decode_arrivals(tuple(ghost["spawn"]), ghost["moves"])
+    headings = decode_optional_moves(ghost["headings"])
+    next_headings = decode_optional_moves(ghost["next_headings"])
+    progress = ghost["progress"]
+
+    if not len(positions) == len(headings) == len(next_headings) == len(progress) == states:
+        raise ValueError(f"Ghost '{ghost['kind']}' does not have one entry per tick.")
+
+    return [
+        GhostState(
+            kind=ghost["kind"],
+            position=position,
+            heading=heading,
+            next_heading=next_heading,
+            progress=amount,
+        )
+        for position, heading, next_heading, amount in zip(positions, headings, next_headings, progress)
+    ]
 
 
 @dataclass
 class SimulationResult:
     states: list[SimulationState]
-    actions: list[Action]
+    # Pac-Man's decision in each tick; None in ticks where he was moving and not asked.
+    actions: list[Action | None]
+    # Per tick, the latest status (the same object again while the controller is not asked)
     statuses: list[ControllerStatus | None]
     metrics: SimulationMetrics
     maze: Maze | None = None
@@ -150,6 +204,8 @@ class SimulationResult:
     ghost_statuses: list[tuple[GhostStatus | None, ...]] = field(default_factory=list)
     # describe() of each ghost's controller, in ghost order
     ghosts: list[dict[str, Any]] = field(default_factory=list)
+    # The movement speeds of the run
+    speeds: SpeedRules = EQUAL
 
     @classmethod
     def from_engine(
@@ -170,6 +226,7 @@ class SimulationResult:
             controller=dict(controller) if controller is not None else None,
             ghost_statuses=list(ghost_statuses) if ghost_statuses is not None else [],
             ghosts=[dict(ghost) for ghost in ghosts or []],
+            speeds=engine.speeds,
         )
 
     @property
@@ -184,7 +241,7 @@ class SimulationResult:
             raise IndexError(f"Step {step} is outside the recorded history.")
         return self.get_state(step)
 
-    def get_action(self, index: int) -> Action:
+    def get_action(self, index: int) -> Action | None:
         return self.actions[index]
 
     def history_summary(self) -> list[dict[str, Any]]:
@@ -210,51 +267,62 @@ class SimulationResult:
 
     def to_dict(self) -> dict[str, Any]:
         """
-        The saved form: every state, action and status, stored compactly and
+        The saved form: every tick, action and status, stored compactly and
         rebuilt exactly by from_dict.
 
-        - States: Pac-Man's position per state, the pellets eaten (step, row,
-          col) and how the run ended. The step count is the state's index, the
-          remaining pellets follow from the eaten ones, and only the last state
-          can be terminated.
-        - Actions and ghost tracks are move strings ("ULLD...", one move per step).
-        - Ghosts: kind, spawn, controller and moves.
+        - Time runs in ticks; the tick count is the state's index, and only the
+          last state can be terminated.
+        - Per mover, strings with one character per state or tick: "moves" (the
+          tile it arrived on in that tick, "." when none), "headings" (the move in
+          progress, "." for none), and a list of "progress" values. Ghosts also
+          have "next_headings" (the exit chosen one tile ahead).
+        - Pellets: the eaten ones as (tick, row, col); the remaining pellets follow.
+        - "actions": Pac-Man's decision per tick ("." when he was not asked).
         - Paths are "row,col:MOVES" (see simulation/encoding.py).
         - Pac-Man statuses: fields in "status_fields"; the path is null when
-          unchanged since the previous step's status.
-        - Ghost statuses: per step, one entry per ghost (fields in "ghost_status_fields").
+          unchanged since the previous status. Ghost statuses: per tick, one entry
+          per ghost (fields in "ghost_status_fields"). "=" in either: the same
+          status as the previous tick (the controller was not asked).
         """
         self._check_history()
 
         return {
             "format_version": FORMAT_VERSION,
             "controller": self.controller,
+            "speeds": self.speeds.to_dict(),
             "maze": maze_to_dict(self.maze) if self.maze is not None else None,
             "terminated": self.states[-1].terminated,
             "termination_reason": self.states[-1].termination_reason,
-            "pacman_positions": [list(state.pacman_position) for state in self.states],
+            "pacman": {
+                "start": list(self.states[0].pacman_position),
+                "moves": encode_arrivals([state.pacman_position for state in self.states]),
+                "headings": encode_optional_moves([state.pacman_heading for state in self.states]),
+                "progress": [state.pacman_progress for state in self.states],
+            },
             "pellets_eaten": [
                 [index, *position]
                 for index, (before, after) in enumerate(zip(self.states, self.states[1:]), start=1)
                 for position in sorted(before.remaining_pellets - after.remaining_pellets)
             ],
-            "actions": encode_moves(self.actions),
+            "actions": encode_optional_moves(self.actions),
             "ghosts": [
                 {
                     "kind": ghost.kind,
                     "spawn": list(ghost.position),
                     "controller": self.ghosts[index] if index < len(self.ghosts) else None,
-                    "moves": encode_moves([state.ghosts[index].direction for state in self.states[1:]]),
+                    "moves": encode_arrivals([state.ghosts[index].position for state in self.states]),
+                    "headings": encode_optional_moves([state.ghosts[index].heading for state in self.states]),
+                    "next_headings": encode_optional_moves(
+                        [state.ghosts[index].next_heading for state in self.states]
+                    ),
+                    "progress": [state.ghosts[index].progress for state in self.states],
                 }
                 for index, ghost in enumerate(self.states[0].ghosts)
             ],
             "status_fields": list(STATUS_FIELDS),
             "statuses": _encode_statuses(self.statuses),
             "ghost_status_fields": list(GHOST_STATUS_FIELDS),
-            "ghost_statuses": [
-                [_encode_ghost_status(status) for status in step]
-                for step in self.ghost_statuses
-            ],
+            "ghost_statuses": _encode_ghost_statuses(self.ghost_statuses),
             "metrics": self.metrics.to_dict(),
         }
 
@@ -269,7 +337,7 @@ class SimulationResult:
 
         for index, state in enumerate(self.states):
             if state.steps != index or (state.terminated and index != len(self.states) - 1):
-                raise ValueError(f"State {index} breaks the recorded-history layout (steps, termination).")
+                raise ValueError(f"State {index} breaks the recorded-history layout (ticks, termination).")
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SimulationResult:
@@ -290,18 +358,23 @@ class SimulationResult:
             )
 
         maze = maze_from_dict(maze_data)
-        actions = decode_moves(data["actions"])
-        positions = [tuple(position) for position in data["pacman_positions"]]
+        speeds = SpeedRules.from_dict(data["speeds"])
+        actions = decode_optional_moves(data["actions"])
 
-        if len(positions) != len(actions) + 1:
-            raise ValueError("The result has a different number of states and actions.")
+        pacman = data["pacman"]
+        positions = decode_arrivals(tuple(pacman["start"]), pacman["moves"])
+        headings = decode_optional_moves(pacman["headings"])
+        progress = pacman["progress"]
+
+        if not len(positions) == len(headings) == len(progress) == len(actions) + 1:
+            raise ValueError("The result does not have one Pac-Man entry per tick.")
 
         eaten: dict[int, list[Position]] = {}
 
         for step, row, col in data["pellets_eaten"]:
             eaten.setdefault(step, []).append((row, col))
 
-        ghost_tracks = [_ghost_track(maze, ghost, len(actions)) for ghost in data["ghosts"]]
+        ghost_tracks = [_ghost_track(ghost, len(positions)) for ghost in data["ghosts"]]
 
         states = []
         remaining = set(maze.initial_pellets)
@@ -309,8 +382,10 @@ class SimulationResult:
         for index, position in enumerate(positions):
             remaining -= set(eaten.get(index, ()))
 
-            state = SimulationState(maze)
+            state = SimulationState(maze, speeds.move_cost)
             state.pacman_position = position
+            state.pacman_heading = headings[index]
+            state.pacman_progress = progress[index]
             state.remaining_pellets = set(remaining)
             state.steps = index
             state.ghosts = tuple(track[index] for track in ghost_tracks)
@@ -326,11 +401,9 @@ class SimulationResult:
             metrics=SimulationMetrics(**data["metrics"]),
             maze=maze,
             controller=data.get("controller"),
-            ghost_statuses=[
-                tuple(_decode_ghost_status(status) for status in step)
-                for step in data["ghost_statuses"]
-            ],
+            ghost_statuses=_decode_ghost_statuses(data["ghost_statuses"]),
             ghosts=[ghost["controller"] for ghost in data["ghosts"] if ghost["controller"] is not None],
+            speeds=speeds,
         )
 
     def save_json(self, filepath: str | Path) -> None:
@@ -354,7 +427,7 @@ class SimulationResult:
         """Every state in full (pellets and ghosts included): large, for reading by eye."""
         data = {
             "states": [state.to_dict() for state in self.states],
-            "actions": [action.value for action in self.actions],
+            "actions": [action.value if action is not None else None for action in self.actions],
         }
 
         Path(filepath).write_text(
